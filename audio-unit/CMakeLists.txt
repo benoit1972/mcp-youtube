@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.22)
-project(SimpleGain VERSION 0.1.0)
+project(GlitchGrain VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
+
+option(GG_BUILD_DSP_TESTS "Build the JUCE-free DSP tests" ON)
+if(GG_BUILD_DSP_TESTS)
+  enable_testing()
+  add_executable(GlitchGrainDspTest tests/dsp_test.cpp)
+  add_test(NAME dsp COMMAND GlitchGrainDspTest)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -12,27 +19,38 @@ FetchContent_Declare(JUCE
   GIT_SHALLOW ON)
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_plugin(SimpleGain
+if(APPLE)
+  set(GG_FORMATS AU Standalone)
+else()
+  set(GG_FORMATS Standalone) # AU only exists on macOS; Standalone lets other OSes compile-check the code
+endif()
+
+juce_add_plugin(GlitchGrain
   COMPANY_NAME "Benoit"
   PLUGIN_MANUFACTURER_CODE Benp
-  PLUGIN_CODE Sgn1
-  FORMATS AU Standalone
-  PRODUCT_NAME "Simple Gain"
-  AU_MAIN_TYPE kAudioUnitType_Effect
-  IS_SYNTH FALSE
-  NEEDS_MIDI_INPUT FALSE
+  PLUGIN_CODE Ggr1
+  FORMATS ${GG_FORMATS}
+  PRODUCT_NAME "Glitch Grain"
+  AU_MAIN_TYPE kAudioUnitType_MusicDevice
+  IS_SYNTH TRUE
+  NEEDS_MIDI_INPUT TRUE
   NEEDS_MIDI_OUTPUT FALSE
-  COPY_PLUGIN_AFTER_BUILD TRUE)
+  COPY_PLUGIN_AFTER_BUILD ${APPLE})
 
-target_sources(SimpleGain PRIVATE
+target_sources(GlitchGrain PRIVATE
   Source/PluginProcessor.cpp
-  Source/PluginProcessor.h)
+  Source/PluginProcessor.h
+  Source/PluginEditor.cpp
+  Source/PluginEditor.h
+  Source/Dsp/Rng.h
+  Source/Dsp/GranularEngine.h
+  Source/Dsp/GlitchFx.h)
 
-target_compile_definitions(SimpleGain PUBLIC
+target_compile_definitions(GlitchGrain PUBLIC
   JUCE_WEB_BROWSER=0
   JUCE_USE_CURL=0
   JUCE_VST3_CAN_REPLACE_VST2=0)
 
-target_link_libraries(SimpleGain PRIVATE
+target_link_libraries(GlitchGrain PRIVATE
   juce::juce_audio_utils
   PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
