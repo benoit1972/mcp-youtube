@@ -27,7 +27,7 @@ private:
     void addSection (const char* title, int column, int row,
                      std::initializer_list<std::pair<const char*, const char*>> params);
 
-    GlitchGrainProcessor& processor;
+    GlitchGrainProcessor& proc;
     juce::OwnedArray<Knob> knobs;
     std::vector<Section> sections;
     juce::TextButton loadButton { "Load sample..." };

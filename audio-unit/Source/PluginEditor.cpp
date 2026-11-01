@@ -11,7 +11,7 @@ GlitchGrainEditor::Knob& GlitchGrainEditor::addKnob (const char* paramId, const 
     k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 18);
     k->label.setText (text, juce::dontSendNotification);
     k->label.setJustificationType (juce::Justification::centred);
-    k->attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (processor.apvts, paramId, k->slider);
+    k->attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, paramId, k->slider);
     addAndMakeVisible (k->slider);
     addAndMakeVisible (k->label);
     return *k;
@@ -27,7 +27,7 @@ void GlitchGrainEditor::addSection (const char* title, int column, int row,
 }
 
 GlitchGrainEditor::GlitchGrainEditor (GlitchGrainProcessor& p)
-    : AudioProcessorEditor (&p), processor (p)
+    : AudioProcessorEditor (&p), proc (p)
 {
     // left column: the instrument
     addSection ("GRAINS", 0, 0, { { "position", "Position" }, { "spray", "Spray" }, { "size", "Grain Size" },
@@ -43,7 +43,7 @@ GlitchGrainEditor::GlitchGrainEditor (GlitchGrainProcessor& p)
     addSection ("TAPE  &  DELAY", 1, 1, { { "tape", "Tape" }, { "delayTime", "Time" }, { "delayFb", "Feedback" }, { "delayMix", "Mix" } });
     addSection ("REVERB  &  SHIMMER", 1, 2, { { "reverbSize", "Size" }, { "reverbDamp", "Damping" }, { "reverbMix", "Mix" }, { "shimmer", "Shimmer" } });
 
-    sampleLabel.setText (processor.getSampleName(), juce::dontSendNotification);
+    sampleLabel.setText (proc.getSampleName(), juce::dontSendNotification);
     sampleLabel.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (sampleLabel);
     addAndMakeVisible (loadButton);
@@ -56,8 +56,8 @@ GlitchGrainEditor::GlitchGrainEditor (GlitchGrainProcessor& p)
                               {
                                   const auto f = fc.getResult();
                                   if (f == juce::File()) return;
-                                  if (processor.loadSample (f))
-                                      sampleLabel.setText (processor.getSampleName(), juce::dontSendNotification);
+                                  if (proc.loadSample (f))
+                                      sampleLabel.setText (proc.getSampleName(), juce::dontSendNotification);
                                   else
                                       sampleLabel.setText ("Could not read " + f.getFileName(), juce::dontSendNotification);
                               });
