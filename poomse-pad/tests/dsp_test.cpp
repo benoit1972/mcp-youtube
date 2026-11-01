@@ -308,7 +308,7 @@ int main()
         static const Known known[] = {
             { "time", 0.1f, 60.f }, { "rise", 0.02f, 10.f }, { "sub", 0.f, 1.f }, { "body", 0.f, 1.f }, { "fifth", 0.f, 1.f },
             { "octave", 0.f, 1.f }, { "evolve", 0.f, 1.f }, { "rate", 0.01f, 1.f }, { "tone", -1.f, 1.f }, { "width", 0.f, 1.f },
-            { "revSize", 0.f, 1.f }, { "revMix", 0.f, 1.f }, { "mix", 0.f, 1.f }, { "level", -48.f, 6.f },
+            { "revSize", 0.f, 1.f }, { "revMix", 0.f, 1.f }, { "mix", 0.f, 1.f }, { "morph", 0.f, 1.f }, { "level", -48.f, 6.f },
             { "lfo1Rate", 0.02f, 20.f }, { "lfo1Sync", 0.f, 5.f }, { "lfo1Shape", 0.f, 4.f },
             { "lfo2Rate", 0.02f, 20.f }, { "lfo2Sync", 0.f, 5.f }, { "lfo2Shape", 0.f, 4.f },
             { "seqSteps", 1.f, 16.f }, { "seqHits", 0.f, 16.f }, { "seqRot", 0.f, 15.f }, { "seqRate", 0.f, 6.f },
@@ -355,9 +355,9 @@ int main()
         for (int test = 0; test < 2; ++test)
         {
             pad::Sampler sp; sp.prepare (sr);
-            sp.noteOn (test == 0 ? 60 : 72, 1.f, *sb);
+            sp.noteOn (test == 0 ? 60 : 72, 1.f, *sb, *sb);
             std::vector<float> o ((size_t) sr);
-            for (int i = 0; i < (int) sr; ++i) { float l, r; sp.process (*sb, true, l, r); o[(size_t) i] = l; }
+            for (int i = 0; i < (int) sr; ++i) { float l, r, l2, r2; sp.process (*sb, *sb, true, l, r, l2, r2); o[(size_t) i] = l; }
             const int cycles = zc (o, 2000, (int) sr - 2000);
             const double expect = (test == 0 ? 440.0 : 880.0) * ((sr - 4000) / sr);
             CHECK (std::abs (cycles - expect) < expect * 0.03);
@@ -367,9 +367,9 @@ int main()
         for (int loop = 0; loop < 2; ++loop)
         {
             pad::Sampler sp; sp.prepare (sr);
-            sp.noteOn (60, 1.f, *sb);
+            sp.noteOn (60, 1.f, *sb, *sb);
             std::vector<float> o ((size_t) (sr * 3));
-            for (int i = 0; i < (int) (sr * 3); ++i) { float l, r; sp.process (*sb, loop == 1, l, r); o[(size_t) i] = l; }
+            for (int i = 0; i < (int) (sr * 3); ++i) { float l, r, l2, r2; sp.process (*sb, *sb, loop == 1, l, r, l2, r2); o[(size_t) i] = l; }
             const double late = rmsOf (o, (int) (sr * 2.0), (int) (sr * 3.0));
             if (loop) CHECK (late > 0.2); else CHECK (late < 1e-6);
             // no big jump at the loop point
@@ -379,20 +379,92 @@ int main()
         // note-off fades to silence quickly; polyphony and stealing never blow up
         {
             pad::Sampler sp; sp.prepare (sr);
-            sp.noteOn (60, 1.f, *sb);
-            for (int i = 0; i < 2000; ++i) { float l, r; sp.process (*sb, true, l, r); }
+            sp.noteOn (60, 1.f, *sb, *sb);
+            float l = 0, r = 0, l2, r2;
+            for (int i = 0; i < 2000; ++i) sp.process (*sb, *sb, true, l, r, l2, r2);
             sp.noteOff (60);
-            float l = 0, r = 0;
-            for (int i = 0; i < (int) (0.2 * sr); ++i) sp.process (*sb, true, l, r);
+            for (int i = 0; i < (int) (0.2 * sr); ++i) sp.process (*sb, *sb, true, l, r, l2, r2);
             CHECK (std::abs (l) < 1e-6f && ! sp.anyActive());
-            for (int n = 0; n < 40; ++n) sp.noteOn (40 + n, 1.f, *sb);
+            for (int n = 0; n < 40; ++n) sp.noteOn (40 + n, 1.f, *sb, *sb);
             double mx = 0;
-            for (int i = 0; i < 20000; ++i) { sp.process (*sb, true, l, r); mx = std::max (mx, (double) std::max (std::abs (l), std::abs (r))); CHECK (std::isfinite (l) && std::isfinite (r)); }
+            for (int i = 0; i < 20000; ++i) { sp.process (*sb, *sb, true, l, r, l2, r2); mx = std::max (mx, (double) std::max (std::abs (l), std::abs (r))); CHECK (std::isfinite (l) && std::isfinite (r)); }
             CHECK (mx < 8.0);
         }
         // the built-in drone is a valid source
-        auto d = pad::SourceBuffer::makeDefault (sr);
-        CHECK (d->size() == (int) (sr * 4.0));
+        auto d = pad::SourceBuffer::makeDefault (sr), d2 = pad::SourceBuffer::makeDefault (sr, 1);
+        CHECK (d->size() == (int) (sr * 4.0) && d2->size() == d->size());
+        double diff = 0; for (int i = 0; i < d->size(); ++i) diff += std::abs (d->l[(size_t) i] - d2->l[(size_t) i]);
+        CHECK (diff > 100.0);   // zone A and zone B start with genuinely different sounds
+    }
+
+    // ---- two zones, spectral morph between them ----
+    {
+        // A = 440 Hz sine, B = 660 Hz sine, both played by the same engine
+        for (int step = 0; step < 4; ++step)
+        {
+            const float morph = step == 0 ? 0.f : step == 1 ? 1.f : step == 2 ? 0.5f : 0.25f;
+            pad::SpectralPad sp; sp.prepare (sr);
+            pad::PadParams p; p.evolve = 0.f; p.riseSec = 0.2f; p.timeSec = 4.f; p.morph = morph;
+            const int n = (int) (sr * 8);
+            std::vector<float> outL ((size_t) n), outR ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = (double) i / sr;
+                const float a = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 440.0 * t), b = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 660.0 * t);
+                sp.process (a, a, b, b, p, outL[(size_t) i], outR[(size_t) i]);
+            }
+            const double nearA = energyNear (outL, (int) (sr * 3.0), (int) (sr * 8.0), sr, 440.0, 1.0);
+            const double nearB = energyNear (outL, (int) (sr * 3.0), (int) (sr * 8.0), sr, 660.0, 1.0);
+            std::printf ("morph %.2f: %.0f%% of the energy at A (440 Hz), %.0f%% at B (660 Hz)\n", morph, nearA * 100.0, nearB * 100.0);
+            if (step == 0) CHECK (nearA > 0.9 && nearB < 0.05);
+            if (step == 1) CHECK (nearB > 0.9 && nearA < 0.05);
+            if (step == 2) CHECK (nearA > 0.35 && nearB > 0.35 && std::abs (nearA - nearB) < 0.25);        // both present, about equally
+            if (step == 3) CHECK (nearA > nearB * 2.0 && nearB > 0.05);                                    // mostly A, some B
+        }
+    }
+
+    // ---- Layers mode: both sounds stay, constant power; Morph mode dips in the middle ----
+    {
+        double level[2] = { 0, 0 }, atA[2] = { 0, 0 }, atB[2] = { 0, 0 };
+        for (int mode = 0; mode < 2; ++mode)
+        {
+            pad::SpectralPad sp; sp.prepare (sr);
+            pad::PadParams p; p.evolve = 0.f; p.riseSec = 0.2f; p.timeSec = 4.f; p.morph = 0.5f; p.layers = (mode == 1);
+            const int n = (int) (sr * 8);
+            std::vector<float> outL ((size_t) n), outR ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = (double) i / sr;
+                const float a = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 440.0 * t), b = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 660.0 * t);
+                sp.process (a, a, b, b, p, outL[(size_t) i], outR[(size_t) i]);
+            }
+            level[mode] = rmsOf (outL, (int) (sr * 4.0), n);
+            atA[mode] = energyNear (outL, (int) (sr * 4.0), n, sr, 440.0, 1.0);
+            atB[mode] = energyNear (outL, (int) (sr * 4.0), n, sr, 660.0, 1.0);
+        }
+        std::printf ("layers vs morph at 50%%: layers %.1f dB louder; A/B energy split %.0f/%.0f %%\n", db (level[1] / level[0]), atA[1] * 100.0, atB[1] * 100.0);
+        CHECK (db (level[1] / level[0]) > 2.0 && db (level[1] / level[0]) < 4.5);   // constant power: ~3 dB above the linear morph
+        CHECK (atA[1] > 0.4 && atB[1] > 0.4);                                         // both sounds present
+        // the ends are identical in both modes
+        for (int end = 0; end < 2; ++end)
+        {
+            double e[2];
+            for (int mode = 0; mode < 2; ++mode)
+            {
+                pad::SpectralPad sp; sp.prepare (sr);
+                pad::PadParams p; p.evolve = 0.f; p.riseSec = 0.2f; p.timeSec = 4.f; p.morph = (float) end; p.layers = (mode == 1);
+                const int n = (int) (sr * 6);
+                std::vector<float> outL ((size_t) n), outR ((size_t) n);
+                for (int i = 0; i < n; ++i)
+                {
+                    const double t = (double) i / sr;
+                    const float a = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 440.0 * t), b = 0.4f * (float) std::sin (2.0 * 3.14159265358979 * 660.0 * t);
+                    sp.process (a, a, b, b, p, outL[(size_t) i], outR[(size_t) i]);
+                }
+                e[mode] = rmsOf (outL, (int) (sr * 3.0), n);
+            }
+            CHECK (std::abs (db (e[0] / e[1])) < 0.6);
+        }
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);

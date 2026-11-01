@@ -3,11 +3,24 @@
 #include "PluginProcessor.h"
 
 // Live spectrum of the pad (what is actually being synthesised), auto-scaled so it always shows the shape.
-// It is also the drop zone: drag an audio file from the Finder onto it to load the sample.
-class SpectrumView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
+class SpectrumView : public juce::Component, private juce::Timer
 {
 public:
-    explicit SpectrumView (PoomsePadProcessor& p);
+    explicit SpectrumView (PoomsePadProcessor& p) : proc (p) { startTimerHz (30); }
+    void paint (juce::Graphics&) override;
+private:
+    void timerCallback() override { if (isVisible()) repaint(); }
+    PoomsePadProcessor& proc;
+    float peakDb = -60.f;
+    std::array<float, pad::kDisplayBands> smooth {};
+};
+
+// Drop zone for one of the two samples (A = slot 0, B = slot 1): drag an audio file from the Finder onto it.
+// Its brightness follows how much of the sample is currently in the sound (so a modulated Morph is visible).
+class SamplePanel : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
+{
+public:
+    SamplePanel (PoomsePadProcessor& p, int slotIndex);
     void paint (juce::Graphics&) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -18,11 +31,11 @@ public:
 private:
     void timerCallback() override;
     PoomsePadProcessor& proc;
-    float peakDb = -60.f;
-    std::array<float, pad::kDisplayBands> smooth {};
+    const int slot;
     std::vector<float> peaks;
     juce::String name, message;
     int messageTicks = 0;
+    float weight = 1.f;
     bool dropHover = false;
 };
 
@@ -107,12 +120,13 @@ private:
     int currentPage = 0;
 
     SpectrumView spectrum;
+    SamplePanel panelA, panelB;
     EuclidView euclid;
     ModMatrixView matrixView;
     juce::TextButton tabButtons[4];
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" };
-    juce::TextButton prevPreset { "<" }, nextPreset { ">" }, loopButton { "Loop" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> loopAttachment;
+    juce::TextButton prevPreset { "<" }, nextPreset { ">" }, loopButton { "Loop" }, layersButton { "Layers" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> loopAttachment, layersAttachment;
     juce::ComboBox presetBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
     bool resetArmed = false;

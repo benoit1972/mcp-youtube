@@ -20,7 +20,7 @@ inline constexpr ModDest kModDests[] = {
     { "rate", "Evolve rate" },      { "sub", "Sub layer" },         { "body", "Body layer" },
     { "fifth", "Fifth layer" },     { "octave", "Octave layer" },   { "tone", "Tone" },
     { "width", "Width" },           { "revSize", "Reverb size" },   { "revMix", "Reverb mix" },
-    { "mix", "Dry / wet mix" },     { "level", "Level" },
+    { "mix", "Dry / wet mix" },     { "morph", "Morph A-B" },       { "level", "Level" },
 };
 constexpr int kNumDests = (int) (sizeof (kModDests) / sizeof (kModDests[0]));
 

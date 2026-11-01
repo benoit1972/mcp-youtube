@@ -65,10 +65,12 @@ public:
     int getSeqStep() const { return seq.currentStep(); }
     float getDisplayBand (int i) const { return spectrumDisplay[(size_t) i].load(); }
 
-    // The sound source: a sample (built-in drone until a file is dropped on the window). Message thread only.
-    bool loadSample (const juce::File& file);
-    juce::String getSampleName() const;
-    std::vector<float> getPeaks() const; // 320 normalised peaks, for the display
+    // The two sound sources, zone A (slot 0) and zone B (slot 1): a sample each (built-in sounds until a file is
+    // dropped on the zone). Message thread only.
+    bool loadSample (int slot, const juce::File& file);
+    juce::String getSampleName (int slot) const;
+    std::vector<float> getPeaks (int slot) const; // 320 normalised peaks, for the display
+    float getMorphDisplay() const { return morphDisplay.load(); } // the morph actually applied (modulation included)
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -76,16 +78,17 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     float param (const char* id) const; // value with the macro modulation applied
 
-    void publishSource (std::shared_ptr<const pad::SourceBuffer> s);
+    void publishSource (int slot, std::shared_ptr<const pad::SourceBuffer> s);
 
     // Source hand-over: message thread publishes, audio thread picks it up with a try-lock. Retired buffers stay
     // alive until the message thread purges them, so the audio thread never frees memory.
     juce::SpinLock sourceLock;
-    std::shared_ptr<const pad::SourceBuffer> source;      // guarded by sourceLock
-    std::shared_ptr<const pad::SourceBuffer> audioSource; // audio thread only
+    std::shared_ptr<const pad::SourceBuffer> source[2];      // guarded by sourceLock
+    std::shared_ptr<const pad::SourceBuffer> audioSource[2]; // audio thread only
     std::vector<std::shared_ptr<const pad::SourceBuffer>> retired; // message thread only
     mutable juce::SpinLock peakLock;
-    std::vector<float> peaks;
+    std::vector<float> peaks[2];
+    std::atomic<float> morphDisplay { 0.f };
     pad::Sampler sampler;
 
     pad::SpectralPad padEngine;

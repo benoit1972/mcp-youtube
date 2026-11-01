@@ -9,64 +9,14 @@ int cellHeight (int cell) { return cell == 0 ? 128 : cell == 1 ? 104 : 96; }
 } // namespace
 
 //==============================================================================
-SpectrumView::SpectrumView (PoomsePadProcessor& p) : proc (p)
-{
-    peaks = proc.getPeaks();
-    name = proc.getSampleName();
-    startTimerHz (30);
-}
-
-void SpectrumView::timerCallback()
-{
-    if (! isVisible()) return;
-    const auto n = proc.getSampleName();
-    if (n != name) { name = n; peaks = proc.getPeaks(); }
-    if (messageTicks > 0 && --messageTicks == 0) message = {};
-    repaint();
-}
-
-bool SpectrumView::isInterestedInFileDrag (const juce::StringArray& files)
-{
-    for (const auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf")) return true;
-    return false;
-}
-
-void SpectrumView::filesDropped (const juce::StringArray& files, int, int)
-{
-    dropHover = false;
-    for (const auto& f : files)
-    {
-        const juce::File file (f);
-        if (! file.hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf")) continue;
-        if (proc.loadSample (file)) { name = proc.getSampleName(); peaks = proc.getPeaks(); message = {}; }
-        else { message = "COULD NOT READ " + file.getFileName().toUpperCase(); messageTicks = 90; }
-        break; // one sample at a time
-    }
-    repaint();
-}
-
 void SpectrumView::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     g.setColour (look::panel);
     g.fillRoundedRectangle (r, 8.f);
-
     const auto inner = r.reduced (12.f, 14.f);
 
-    // faint waveform of the loaded sample in the background
-    if (! peaks.empty())
-    {
-        const float step = inner.getWidth() / (float) peaks.size(), mid = inner.getCentreY();
-        g.setColour (look::track.withAlpha (0.55f));
-        for (size_t i = 0; i < peaks.size(); ++i)
-        {
-            const float h = std::max (1.5f, peaks[i] * inner.getHeight() * 0.8f);
-            g.fillRoundedRectangle (inner.getX() + (float) i * step + step * 0.2f, mid - h * 0.5f, std::max (1.f, step * 0.6f), h, 1.f);
-        }
-    }
-
-    // spectrum of the pad: dB values, auto-scaled to a 55 dB window below the (slowly following) maximum
+    // dB values, auto-scaled to a 55 dB window below the (slowly following) maximum
     float maxDb = -200.f;
     std::array<float, pad::kDisplayBands> db {};
     for (int b = 0; b < pad::kDisplayBands; ++b)
@@ -98,21 +48,88 @@ void SpectrumView::paint (juce::Graphics& g)
     g.setFont (look::caps (9.5f, true, 0.12f));
     g.drawText ("30 HZ", getLocalBounds().reduced (12, 5), juce::Justification::bottomLeft, false);
     g.drawText ("16 KHZ", getLocalBounds().reduced (12, 5), juce::Justification::bottomRight, false);
-    g.drawText (("SAMPLE: " + name).toUpperCase(), getLocalBounds().reduced (12, 5), juce::Justification::topLeft, false);
-    g.drawText ("DROP A SAMPLE HERE", getLocalBounds().reduced (12, 5).withTrimmedRight (84), juce::Justification::topRight, false);
-    if (message.isNotEmpty())
+    g.drawText ("PAD SPECTRUM", getLocalBounds().reduced (12, 5), juce::Justification::topLeft, false);
+}
+
+//==============================================================================
+SamplePanel::SamplePanel (PoomsePadProcessor& p, int slotIndex) : proc (p), slot (slotIndex)
+{
+    peaks = proc.getPeaks (slot);
+    name = proc.getSampleName (slot);
+    startTimerHz (30);
+}
+
+void SamplePanel::timerCallback()
+{
+    if (! isVisible()) return;
+    const auto n = proc.getSampleName (slot);
+    if (n != name) { name = n; peaks = proc.getPeaks (slot); }
+    if (messageTicks > 0 && --messageTicks == 0) message = {};
+    const float m = proc.getMorphDisplay();
+    weight = slot == 0 ? 1.f - m : m;
+    repaint();
+}
+
+bool SamplePanel::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf")) return true;
+    return false;
+}
+
+void SamplePanel::filesDropped (const juce::StringArray& files, int, int)
+{
+    dropHover = false;
+    for (const auto& f : files)
     {
-        g.setColour (look::negative);
-        g.drawText (message, getLocalBounds().reduced (12, 5), juce::Justification::bottomLeft, false);
+        const juce::File file (f);
+        if (! file.hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf")) continue;
+        if (proc.loadSample (slot, file)) { name = proc.getSampleName (slot); peaks = proc.getPeaks (slot); message = {}; }
+        else { message = "COULD NOT READ"; messageTicks = 90; }
+        break; // one sample at a time
     }
+    repaint();
+}
+
+void SamplePanel::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (look::panel);
+    g.fillRoundedRectangle (r, 8.f);
+
+    // outline brightness = how present this sample currently is
+    g.setColour (look::accent.withAlpha (0.12f + 0.7f * weight));
+    g.drawRoundedRectangle (r.reduced (0.75f), 8.f, 1.4f);
+
+    const auto inner = r.reduced (10.f, 24.f);
+    if (! peaks.empty())
+    {
+        const float step = inner.getWidth() / (float) peaks.size(), mid = inner.getCentreY();
+        g.setColour (look::accent.withAlpha (0.18f + 0.5f * weight));
+        for (size_t i = 0; i < peaks.size(); ++i)
+        {
+            const float h = std::max (1.5f, peaks[i] * inner.getHeight());
+            g.fillRoundedRectangle (inner.getX() + (float) i * step + step * 0.2f, mid - h * 0.5f, std::max (1.f, step * 0.6f), h, 1.f);
+        }
+    }
+
+    g.setColour (look::text.withAlpha (0.35f + 0.65f * weight));
+    g.setFont (look::caps (15.f, true, 0.1f));
+    g.drawText (slot == 0 ? "A" : "B", getLocalBounds().reduced (11, 6), juce::Justification::topLeft, false);
+
+    g.setColour (look::dim);
+    g.setFont (look::caps (9.f, true, 0.1f));
+    g.drawText (name.toUpperCase(), getLocalBounds().reduced (11, 6).withTrimmedLeft (18), juce::Justification::topLeft, true);
+    g.drawText (message.isNotEmpty() ? message : juce::String ("DROP SAMPLE " + juce::String (slot == 0 ? "A" : "B")),
+                getLocalBounds().reduced (11, 6), juce::Justification::bottomLeft, false);
 
     if (dropHover)
     {
-        g.setColour (look::accent.withAlpha (0.14f));
+        g.setColour (look::accent.withAlpha (0.16f));
         g.fillRoundedRectangle (r, 8.f);
         g.setColour (look::accent);
         g.drawRoundedRectangle (r.reduced (1.f), 8.f, 2.f);
-        g.setFont (look::caps (16.f, true, 0.25f));
+        g.setFont (look::caps (12.f, true, 0.2f));
         g.drawText ("DROP TO LOAD", getLocalBounds(), juce::Justification::centred, false);
     }
 }
@@ -325,13 +342,13 @@ void PoomsePadEditor::addRow (int page, const char* title, Cell cell, int cols,
 }
 
 PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), spectrum (p), euclid (p), matrixView (p)
+    : AudioProcessorEditor (&p), proc (p), spectrum (p), panelA (p, 0), panelB (p, 1), euclid (p), matrixView (p)
 {
     setLookAndFeel (&laf);
 
     // page 0: PAD (home)
     pages[0].spectrum = true;
-    addRow (0, "Pad", Cell::Big, 5, { { "time", "Time" }, { "rise", "Rise" }, { "evolve", "Evolve" },
+    addRow (0, "Pad", Cell::Big, 6, { { "morph", "Morph A-B" }, { "time", "Time" }, { "rise", "Rise" }, { "evolve", "Evolve" },
                                       { "rate", "Evolve rate" }, { "mix", "Mix" } });
     addRow (0, "Layers  -  the same sound, shifted", Cell::Small, 4, { { "sub", "Sub -12" }, { "body", "Body" },
                                                                         { "fifth", "Fifth +7" }, { "octave", "Octave +12" } });
@@ -349,6 +366,8 @@ PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
                                                        { "seqRate", "Rate" }, { "seqDecay", "Decay" }, { "seqRandom", "Random" } });
 
     addChildComponent (spectrum);
+    addChildComponent (panelA);
+    addChildComponent (panelB);
     addChildComponent (euclid);
     addChildComponent (matrixView);
 
@@ -405,6 +424,10 @@ PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
     loopButton.setClickingTogglesState (true);
     loopAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "loop", loopButton);
     addAndMakeVisible (loopButton);
+    layersButton.setComponentID ("toggle");   // off = Morph (A turns into B), on = Layers (A and B always together)
+    layersButton.setClickingTogglesState (true);
+    layersAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "layers", layersButton);
+    addAndMakeVisible (layersButton);
 
     // preset menu: < [ name v ] >
     for (int i = 0; i < PoomsePadProcessor::getNumPresets(); ++i)
@@ -453,7 +476,10 @@ void PoomsePadEditor::showPage (int index)
     }
     const bool showSpectrum = index < kNumKnobPages && pages[(size_t) index].spectrum;
     spectrum.setVisible (showSpectrum);
+    panelA.setVisible (showSpectrum);
+    panelB.setVisible (showSpectrum);
     loopButton.setVisible (showSpectrum);
+    layersButton.setVisible (showSpectrum);
     euclid.setVisible (index == 2);
     matrixView.setVisible (index == 3);
     resized();
@@ -522,9 +548,14 @@ void PoomsePadEditor::resized()
         int y = kContentTop;
         if (page.spectrum)
         {
-            spectrum.setBounds (kPad, y, contentW, kSpectrumHeight);
-            loopButton.setBounds (kPad + contentW - 78, y + 6, 66, 22);
+            const int zoneW = 176, gap = 8;
+            panelA.setBounds (kPad, y, zoneW, kSpectrumHeight);
+            panelB.setBounds (kPad + contentW - zoneW, y, zoneW, kSpectrumHeight);
+            spectrum.setBounds (kPad + zoneW + gap, y, contentW - 2 * (zoneW + gap), kSpectrumHeight);
+            loopButton.setBounds (spectrum.getRight() - 64, y + 6, 54, 22);
+            layersButton.setBounds (loopButton.getX() - 62, y + 6, 58, 22);
             loopButton.toFront (false);
+            layersButton.toFront (false);
             y += kSpectrumHeight + 14;
         }
         for (auto& row : page.rows)

@@ -17,8 +17,10 @@ struct SourceBuffer
     double sampleRate = 48000.0;
     int size() const { return (int) l.size(); }
 
-    // Built-in evolving harmonic drone + noise ticks, used until a file is dropped on the window.
-    static std::shared_ptr<SourceBuffer> makeDefault (double sr = 48000.0)
+    // Built-in sources used until a file is dropped on the window.
+    //   variant 0: evolving harmonic drone with soft noise ticks   (zone A)
+    //   variant 1: hollow, airy tone: odd harmonics + breathy noise (zone B)
+    static std::shared_ptr<SourceBuffer> makeDefault (double sr = 48000.0, int variant = 0)
     {
         auto b = std::make_shared<SourceBuffer>();
         b->sampleRate = sr;
@@ -27,6 +29,7 @@ struct SourceBuffer
         b->r.resize ((size_t) n);
         gg::Rng rng (42);
         double phL = 0.0, phR = 0.0;
+        float breathL = 0.f, breathR = 0.f;
         for (int i = 0; i < n; ++i)
         {
             const double t = (double) i / sr;
@@ -35,16 +38,32 @@ struct SourceBuffer
             phL += 2.0 * gg::kPi * f0 / sr;
             phR += 2.0 * gg::kPi * f0 * 1.002 / sr;
             float sl = 0.f, sr_ = 0.f;
-            for (int k = 1; k <= 12; ++k)
+            if (variant == 0)
             {
-                const float amp = (0.5f + 0.5f * (float) std::sin (2.0 * gg::kPi * 0.5 * t + k)) / (float) k;
-                sl += amp * (float) std::sin (k * phL);
-                sr_ += amp * (float) std::sin (k * phR);
+                for (int k = 1; k <= 12; ++k)
+                {
+                    const float amp = (0.5f + 0.5f * (float) std::sin (2.0 * gg::kPi * 0.5 * t + k)) / (float) k;
+                    sl += amp * (float) std::sin (k * phL);
+                    sr_ += amp * (float) std::sin (k * phR);
+                }
+                const double tickT = std::fmod (t, 0.5);
+                const float tick = (float) std::exp (-tickT * 60.0) * 0.4f;
+                b->l[(size_t) i] = sl * 0.3f + tick * rng.bi() * 0.3f;
+                b->r[(size_t) i] = sr_ * 0.3f + tick * rng.bi() * 0.3f;
             }
-            const double tickT = std::fmod (t, 0.5);
-            const float tick = (float) std::exp (-tickT * 60.0) * 0.4f;
-            b->l[(size_t) i] = sl * 0.3f + tick * rng.bi() * 0.3f;
-            b->r[(size_t) i] = sr_ * 0.3f + tick * rng.bi() * 0.3f;
+            else
+            {
+                for (int k = 1; k <= 15; k += 2) // odd harmonics only: hollow, clarinet-like
+                {
+                    const float amp = (0.6f + 0.4f * (float) std::sin (2.0 * gg::kPi * 0.31 * t + 2.0 * k)) / (float) k;
+                    sl += amp * (float) std::sin (k * phL);
+                    sr_ += amp * (float) std::sin (k * phR);
+                }
+                breathL += 0.12f * (rng.bi() - breathL);    // low-passed noise = breath
+                breathR += 0.12f * (rng.bi() - breathR);
+                b->l[(size_t) i] = sl * 0.3f + breathL * 0.5f;
+                b->r[(size_t) i] = sr_ * 0.3f + breathR * 0.5f;
+            }
         }
         float peak = 1e-6f;
         for (int i = 0; i < n; ++i)
@@ -69,7 +88,8 @@ public:
         counter = 0;
     }
 
-    void noteOn (int note, float velocity, const SourceBuffer& src)
+    // every key plays BOTH samples (A and B) at the same transposition; the morph is done later, on the spectra
+    void noteOn (int note, float velocity, const SourceBuffer& a, const SourceBuffer& b)
     {
         Voice* v = nullptr;
         for (auto& x : voices) if (! x.active) { v = &x; break; }
@@ -80,7 +100,9 @@ public:
         }
         *v = Voice{};
         v->active = true; v->held = true; v->note = note; v->vel = velocity;
-        v->inc = std::exp2 ((double) (note - 60) / 12.0) * src.sampleRate / sr;
+        const double ratio = std::exp2 ((double) (note - 60) / 12.0);
+        v->inc[0] = ratio * a.sampleRate / sr;
+        v->inc[1] = ratio * b.sampleRate / sr;
         v->order = ++counter;
     }
 
@@ -93,14 +115,13 @@ public:
     void kill() { for (auto& v : voices) v = Voice{}; }
     bool anyActive() const { for (const auto& v : voices) if (v.active) return true; return false; }
 
-    // one stereo sample (the sum of all voices)
-    void process (const SourceBuffer& src, bool loop, float& outL, float& outR)
+    // one stereo sample of each source (sum of all voices)
+    void process (const SourceBuffer& a, const SourceBuffer& b, bool loop,
+                  float& aL, float& aR, float& bL, float& bR)
     {
-        outL = outR = 0.f;
-        const int n = src.size();
-        if (n < 4) return;
-        const int fade = std::min (n / 4, (int) (0.03 * src.sampleRate)); // loop cross-fade length
-        const int loopEnd = n - fade;
+        aL = aR = bL = bR = 0.f;
+        const SourceBuffer* srcs[2] = { &a, &b };
+        float* outs[2][2] = { { &aL, &aR }, { &bL, &bR } };
 
         for (auto& v : voices)
         {
@@ -108,26 +129,35 @@ public:
             if (v.held) v.env = std::min (1.f, v.env + attackInc);
             else { v.env -= releaseInc; if (v.env <= 0.f) { v = Voice{}; continue; } }
 
-            double pos = v.pos;
-            float l, r;
-            if (loop && fade > 1 && pos >= (double) loopEnd)
-            {
-                const float t = (float) ((pos - (double) loopEnd) / (double) fade);
-                float al, ar, bl, br;
-                read (src, pos, al, ar);
-                read (src, pos - (double) loopEnd, bl, br);
-                l = al * (1.f - t) + bl * t;
-                r = ar * (1.f - t) + br * t;
-            }
-            else
-                read (src, pos, l, r);
-
             const float g = v.env * v.vel * 0.7f;
-            outL += l * g; outR += r * g;
+            bool finished = true;
+            for (int s = 0; s < 2; ++s)
+            {
+                const auto& src = *srcs[s];
+                const int n = src.size();
+                if (n < 4) continue;
+                const int fade = std::min (n / 4, (int) (0.03 * src.sampleRate)); // loop cross-fade length
+                const int loopEnd = n - fade;
+                double pos = v.pos[s];
+                float l, r;
+                if (loop && fade > 1 && pos >= (double) loopEnd)
+                {
+                    const float t = (float) ((pos - (double) loopEnd) / (double) fade);
+                    float al, ar, bl, br;
+                    read (src, pos, al, ar);
+                    read (src, pos - (double) loopEnd, bl, br);
+                    l = al * (1.f - t) + bl * t;
+                    r = ar * (1.f - t) + br * t;
+                }
+                else
+                    read (src, pos, l, r);
+                *outs[s][0] += l * g; *outs[s][1] += r * g;
 
-            v.pos += v.inc;
-            if (loop) { while (v.pos >= (double) n) v.pos -= (double) loopEnd; }
-            else if (v.pos >= (double) (n - 1)) { v.held = false; } // one-shot: let it fade out
+                v.pos[s] += v.inc[s];
+                if (loop) { while (v.pos[s] >= (double) n) v.pos[s] -= (double) loopEnd; finished = false; }
+                else if (v.pos[s] < (double) (n - 1)) finished = false;
+            }
+            if (! loop && finished) v.held = false; // both one-shots reached their end: let the voice fade out
         }
     }
 
@@ -136,7 +166,7 @@ private:
     {
         bool active = false, held = false;
         int note = 60;
-        double pos = 0.0, inc = 1.0;
+        double pos[2] = { 0.0, 0.0 }, inc[2] = { 1.0, 1.0 };
         float vel = 1.f, env = 0.f;
         uint64_t order = 0;
     };

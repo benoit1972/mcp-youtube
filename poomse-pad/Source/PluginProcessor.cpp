@@ -23,12 +23,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomsePadProcessor::createLa
     l.add (std::make_unique<F> (pid ("rise"),   "Rise",   Range (0.02f, 10.f, 0.01f, 0.4f), 0.8f, attr (sec)));
     l.add (std::make_unique<juce::AudioParameterBool> (pid ("hold"), "Hold", false));
     l.add (std::make_unique<juce::AudioParameterBool> (pid ("loop"), "Loop Sample", true));
+    l.add (std::make_unique<juce::AudioParameterBool> (pid ("layers"), "Layers Mode", false));
     l.add (std::make_unique<F> (pid ("sub"),    "Sub (-12 st)",    Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("body"),   "Body",            Range (0.f, 1.f, 0.001f), 1.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("fifth"),  "Fifth (+7 st)",   Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("octave"), "Octave (+12 st)", Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("evolve"), "Evolve",          Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
     l.add (std::make_unique<F> (pid ("rate"),   "Evolve Rate",     Range (0.01f, 1.f, 0.001f, 0.4f), 0.1f, attr (hz)));
+    l.add (std::make_unique<F> (pid ("morph"),  "Morph A-B",       Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     // --- tone, space, output ---
     l.add (std::make_unique<F> (pid ("tone"),    "Tone",          Range (-1.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("width"),   "Width",         Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
@@ -88,7 +90,8 @@ PoomsePadProcessor::PoomsePadProcessor()
     for (auto& m : matrix) m.store (0.f); // the matrix starts empty
     for (auto& v : sourceDisplay) v.store (0.f);
     for (auto& v : spectrumDisplay) v.store (0.f);
-    publishSource (pad::SourceBuffer::makeDefault());
+    publishSource (0, pad::SourceBuffer::makeDefault (48000.0, 0));
+    publishSource (1, pad::SourceBuffer::makeDefault (48000.0, 1));
 }
 
 float PoomsePadProcessor::param (const char* id) const
@@ -132,10 +135,13 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     {
         const juce::SpinLock::ScopedTryLockType lock (sourceLock);
-        if (lock.isLocked() && source != audioSource) audioSource = source;
+        if (lock.isLocked())
+            for (int k = 0; k < 2; ++k)
+                if (source[k] != audioSource[k]) audioSource[k] = source[k];
     }
-    if (audioSource == nullptr) return;
-    const auto& src = *audioSource;
+    if (audioSource[0] == nullptr || audioSource[1] == nullptr) return;
+    const auto& srcA = *audioSource[0];
+    const auto& srcB = *audioSource[1];
 
     double hostBpm = 120.0;
     if (auto* ph = getPlayHead())
@@ -173,12 +179,17 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     pp.fifth = param ("fifth");      pp.octave = param ("octave");
     pp.tone = param ("tone");        pp.width = param ("width");
     pp.evolve = param ("evolve");    pp.evolveRate = param ("rate");
+    pp.morph = juce::jlimit (0.f, 1.f, param ("morph"));
+    pp.layers = apvts.getRawParameterValue ("layers")->load() > 0.5f;
+    morphDisplay.store (pp.morph);
     const bool loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
 
     const float revMix = param ("revMix");
     reverb.setSize (param ("revSize"));
     mixSmooth.setTargetValue (param ("mix"));
     levelSmooth.setTargetValue (juce::Decibels::decibelsToGain (param ("level")));
+
+    const float dryGainA = std::cos (pp.morph * 0.5f * juce::MathConstants<float>::pi), dryGainB = std::sin (pp.morph * 0.5f * juce::MathConstants<float>::pi);
 
     float* L = buffer.getWritePointer (0);
     float* R = buffer.getWritePointer (1);
@@ -190,17 +201,20 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         while (it != midi.end() && (*it).samplePosition <= i)
         {
             const auto m = (*it).getMessage();
-            if (m.isNoteOn())                                   sampler.noteOn (m.getNoteNumber(), m.getFloatVelocity(), src);
+            if (m.isNoteOn())                                   sampler.noteOn (m.getNoteNumber(), m.getFloatVelocity(), srcA, srcB);
             else if (m.isNoteOff())                             sampler.noteOff (m.getNoteNumber());
             else if (m.isAllNotesOff() || m.isAllSoundOff())    sampler.allOff();
             ++it;
         }
 
-        float dryL, dryR;
-        sampler.process (src, loop, dryL, dryR);
+        float aL, aR, bL, bR;
+        sampler.process (srcA, srcB, loop, aL, aR, bL, bR);
+        const float gA = pp.layers ? dryGainA : 1.f - pp.morph, gB = pp.layers ? dryGainB : pp.morph; // the raw samples, same law as the pad
+        const float dryL = aL * gA + bL * gB;
+        const float dryR = aR * gA + bR * gB;
 
         float wl, wr;
-        padEngine.process (dryL, dryR, pp, wl, wr);
+        padEngine.process (aL, aR, bL, bR, pp, wl, wr);             // the pad morphs the two spectra
 
         float rl, rr;
         reverb.process (wl, wr, rl, rr);
@@ -225,7 +239,7 @@ void PoomsePadProcessor::randomise (RandomScope scope)
         { "sub", 0.f, 0.7f },       { "body", 0.5f, 1.f },     { "fifth", 0.f, 0.6f },    { "octave", 0.f, 0.7f },
         { "tone", 0.3f, 0.7f },     { "width", 0.3f, 1.f },    { "revSize", 0.3f, 0.9f }, { "revMix", 0.1f, 0.6f },
     };
-    static const char* const padIds[] = { "time", "rise", "evolve", "rate", "sub", "body", "fifth", "octave" };
+    static const char* const padIds[] = { "time", "rise", "evolve", "rate", "morph", "sub", "body", "fifth", "octave" };
     static const char* const toneIds[] = { "tone", "width", "revSize", "revMix" };
 
     juce::Random rng;
@@ -304,7 +318,7 @@ void PoomsePadProcessor::applyPreset (int index)
     currentPreset.store (index);
 }
 
-void PoomsePadProcessor::publishSource (std::shared_ptr<const pad::SourceBuffer> s)
+void PoomsePadProcessor::publishSource (int slot, std::shared_ptr<const pad::SourceBuffer> s)
 {
     {
         constexpr int bins = 320;
@@ -319,20 +333,21 @@ void PoomsePadProcessor::publishSource (std::shared_ptr<const pad::SourceBuffer>
         }
         for (auto& v : pk) v /= top;
         const juce::SpinLock::ScopedLockType pl (peakLock);
-        peaks = std::move (pk);
+        peaks[slot] = std::move (pk);
     }
 
     const juce::SpinLock::ScopedLockType lock (sourceLock);
-    if (source != nullptr) retired.push_back (std::move (source));
-    source = std::move (s);
+    if (source[slot] != nullptr) retired.push_back (std::move (source[slot]));
+    source[slot] = std::move (s);
     // free retired buffers that the audio thread no longer references
     retired.erase (std::remove_if (retired.begin(), retired.end(),
                                    [] (const auto& p) { return p.use_count() == 1; }),
                    retired.end());
 }
 
-bool PoomsePadProcessor::loadSample (const juce::File& file)
+bool PoomsePadProcessor::loadSample (int slot, const juce::File& file)
 {
+    if (slot < 0 || slot > 1) return false;
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
@@ -350,21 +365,22 @@ bool PoomsePadProcessor::loadSample (const juce::File& file)
     s->l.assign (a, a + len);
     s->r.assign (b, b + len);
 
-    publishSource (std::move (s));
-    apvts.state.setProperty ("samplePath", file.getFullPathName(), nullptr);
+    publishSource (slot, std::move (s));
+    apvts.state.setProperty (slot == 0 ? "samplePath" : "samplePathB", file.getFullPathName(), nullptr);
     return true;
 }
 
-juce::String PoomsePadProcessor::getSampleName() const
+juce::String PoomsePadProcessor::getSampleName (int slot) const
 {
-    const auto path = apvts.state.getProperty ("samplePath").toString();
-    return path.isEmpty() ? "Built-in drone" : juce::File (path).getFileName();
+    const auto path = apvts.state.getProperty (slot == 0 ? "samplePath" : "samplePathB").toString();
+    if (path.isNotEmpty()) return juce::File (path).getFileName();
+    return slot == 0 ? "Built-in drone" : "Built-in air";
 }
 
-std::vector<float> PoomsePadProcessor::getPeaks() const
+std::vector<float> PoomsePadProcessor::getPeaks (int slot) const
 {
     const juce::SpinLock::ScopedLockType pl (peakLock);
-    return peaks;
+    return peaks[slot];
 }
 
 juce::AudioProcessorEditor* PoomsePadProcessor::createEditor() { return new PoomsePadEditor (*this); }
@@ -385,11 +401,14 @@ void PoomsePadProcessor::setStateInformation (const void* data, int size)
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             restoreMatrix (apvts.state.getProperty ("matrix").toString());
             currentPreset.store (juce::jlimit (0, getNumPresets() - 1, (int) apvts.state.getProperty ("preset", 0)));
-            const auto path = apvts.state.getProperty ("samplePath").toString();
-            if (path.isNotEmpty())
+            for (int slot = 0; slot < 2; ++slot)
             {
-                const juce::File f (path);
-                if (f.existsAsFile()) loadSample (f);
+                const auto path = apvts.state.getProperty (slot == 0 ? "samplePath" : "samplePathB").toString();
+                if (path.isNotEmpty())
+                {
+                    const juce::File f (path);
+                    if (f.existsAsFile()) loadSample (slot, f);
+                }
             }
         }
 }

@@ -27,6 +27,9 @@ struct PadParams
     float width = 0.7f;       // 0 = mono pad, 1 = fully decorrelated
     float evolve = 0.3f;      // depth of the slowly moving spectral emphasis
     float evolveRate = 0.1f;  // Hz
+    float morph = 0.f;        // 0 = sample A, 1 = sample B
+    bool layers = false;      // false: spectra are interpolated (A turns into B, hybrid in between)
+                              // true:  A and B always sound together, `morph` only sets their balance (constant power)
 };
 
 class SpectralPad
@@ -43,10 +46,14 @@ public:
         for (int i = 0; i < N; ++i) window[(size_t) i] = 0.5f - 0.5f * std::cos (2.f * kPi * (float) i / (float) N);
         for (int c = 0; c < 2; ++c)
         {
-            inRing[c].assign ((size_t) N, 0.f);
             outRing[c].assign ((size_t) N, 0.f);
-            mag[c].assign ((size_t) bins, 0.f);
+            blend[c].assign ((size_t) bins, 0.f);
             shaped[c].assign ((size_t) bins, 0.f);
+            for (int src = 0; src < 2; ++src)
+            {
+                inRing[src][c].assign ((size_t) N, 0.f);
+                mag[src][c].assign ((size_t) bins, 0.f);
+            }
         }
         re.assign ((size_t) N, 0.f); im.assign ((size_t) N, 0.f);
         binGain.assign ((size_t) bins, 1.f);
@@ -58,11 +65,11 @@ public:
         display.fill (0.f);
     }
 
-    // one stereo sample in, one stereo (wet only) sample out
-    void process (float inL, float inR, const PadParams& p, float& outL, float& outR)
+    // one stereo sample of source A and of source B in, one stereo (wet only) sample out
+    void process (float aL, float aR, float bL, float bR, const PadParams& p, float& outL, float& outR)
     {
-        inRing[0][(size_t) writeIdx] = inL;
-        inRing[1][(size_t) writeIdx] = inR;
+        inRing[0][0][(size_t) writeIdx] = aL;  inRing[0][1][(size_t) writeIdx] = aR;
+        inRing[1][0][(size_t) writeIdx] = bL;  inRing[1][1][(size_t) writeIdx] = bR;
         writeIdx = writeIdx + 1 >= N ? 0 : writeIdx + 1;
 
         outL = outRing[0][(size_t) readIdx]; outRing[0][(size_t) readIdx] = 0.f;
@@ -70,6 +77,12 @@ public:
         readIdx = readIdx + 1 >= N ? 0 : readIdx + 1;
 
         if (++hopCounter >= H) { hopCounter = 0; processFrame (p); }
+    }
+
+    // single-source convenience: the same input feeds A and B
+    void process (float inL, float inR, const PadParams& p, float& outL, float& outR)
+    {
+        process (inL, inR, inL, inR, p, outL, outR);
     }
 
     int frameSize() const { return N; }
@@ -82,23 +95,45 @@ private:
         const float aRise = std::exp (-hopSec / std::max (0.01f, p.riseSec));
         const float aFall = std::exp (-hopSec / std::max (0.05f, p.timeSec));
 
-        // ---- analysis + magnitude smoothing (per channel) ----
-        for (int c = 0; c < 2; ++c)
-        {
-            for (int i = 0; i < N; ++i)
+        // ---- analysis + magnitude smoothing (per source and channel) ----
+        for (int src = 0; src < 2; ++src)
+            for (int c = 0; c < 2; ++c)
             {
-                const int idx = (writeIdx + i) % N; // oldest sample first
-                re[(size_t) i] = inRing[c][(size_t) idx] * window[(size_t) i];
-                im[(size_t) i] = 0.f;
+                for (int i = 0; i < N; ++i)
+                {
+                    const int idx = (writeIdx + i) % N; // oldest sample first
+                    re[(size_t) i] = inRing[src][c][(size_t) idx] * window[(size_t) i];
+                    im[(size_t) i] = 0.f;
+                }
+                fft.transform (re.data(), im.data(), false);
+                auto& m = mag[src][c];
+                if (! p.hold)
+                    for (int k = 0; k < bins; ++k)
+                    {
+                        const float in = std::hypot (re[(size_t) k], im[(size_t) k]);
+                        const float a = in > m[(size_t) k] ? aRise : aFall;
+                        m[(size_t) k] = a * m[(size_t) k] + (1.f - a) * in;
+                    }
             }
-            fft.transform (re.data(), im.data(), false);
-            auto& m = mag[(size_t) c];
-            if (! p.hold)
+
+        // ---- combine the two smoothed magnitude spectra ----
+        const float mph = std::clamp (p.morph, 0.f, 1.f);
+        if (! p.layers)
+        {
+            // MORPH: linear interpolation, A turns into B and passes through a hybrid
+            for (int c = 0; c < 2; ++c)
+                for (int k = 0; k < bins; ++k)
+                    blend[(size_t) c][(size_t) k] = (1.f - mph) * mag[0][c][(size_t) k] + mph * mag[1][c][(size_t) k];
+        }
+        else
+        {
+            // LAYERS: both sounds always present, constant-power balance (no dip in the middle)
+            const float gA = std::cos (mph * 0.5f * kPi), gB = std::sin (mph * 0.5f * kPi);
+            for (int c = 0; c < 2; ++c)
                 for (int k = 0; k < bins; ++k)
                 {
-                    const float in = std::hypot (re[(size_t) k], im[(size_t) k]);
-                    const float a = in > m[(size_t) k] ? aRise : aFall;
-                    m[(size_t) k] = a * m[(size_t) k] + (1.f - a) * in;
+                    const float a = gA * mag[0][c][(size_t) k], b = gB * mag[1][c][(size_t) k];
+                    blend[(size_t) c][(size_t) k] = std::sqrt (a * a + b * b);
                 }
         }
 
@@ -115,7 +150,7 @@ private:
 
         for (int c = 0; c < 2; ++c)
         {
-            auto& m = mag[(size_t) c];
+            auto& m = blend[(size_t) c];
             auto& sh = shaped[(size_t) c];
 
             // 1) harmonic layers (power sum)
@@ -209,7 +244,7 @@ private:
     int N = 8192, H = 2048, bins = 4097;
     Fft fft;
     std::vector<float> window, re, im, binGain, freqOfBin;
-    std::vector<float> inRing[2], outRing[2], mag[2], shaped[2];
+    std::vector<float> inRing[2][2], outRing[2], mag[2][2], blend[2], shaped[2];
     int writeIdx = 0, readIdx = 0, hopCounter = 0;
     float evolvePhase = 0.f;
     gg::Rng rng;

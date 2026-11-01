@@ -68,6 +68,16 @@ inline const std::vector<Preset>& presets()
               { "seqDecay", 0.5f }, { "lfo1Rate", 0.2f }, { "lfo1Shape", 1.f } },
             { { SEQ, "tone", 0.3f }, { LFO1, "evolve", 0.5f } } });
 
+        v.push_back ({ "Slow Morph A-B (LFO)",
+            { { "time", 9.f }, { "rise", 1.2f }, { "evolve", 0.35f }, { "body", 1.f }, { "octave", 0.25f }, { "width", 0.9f },
+              { "revSize", 0.8f }, { "revMix", 0.4f }, { "morph", 0.5f }, { "lfo1Rate", 0.05f }, { "lfo1Shape", 0.f } },
+            { { LFO1, "morph", 0.5f } } });
+        v.push_back ({ "Rhythmic Morph (Sequencer)",
+            { { "time", 5.f }, { "rise", 0.5f }, { "body", 1.f }, { "fifth", 0.2f }, { "width", 0.85f }, { "revSize", 0.7f },
+              { "revMix", 0.35f }, { "morph", 0.f }, { "seqSteps", 8.f }, { "seqHits", 3.f }, { "seqRate", 1.f },
+              { "seqDecay", 0.9f }, { "seqRandom", 0.2f } },
+            { { SEQ, "morph", 0.9f } } });
+
         // the same 6 macros on every preset but Init: space, brightness, motion, length, depth, width
         for (size_t i = 1; i < v.size(); ++i)
         {
