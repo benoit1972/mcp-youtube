@@ -19,8 +19,40 @@ WaveformView::WaveformView (GlitchGrainProcessor& p) : proc (p)
     startTimerHz (30);
 }
 
+bool WaveformView::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf"))
+            return true;
+    return false;
+}
+
+void WaveformView::filesDropped (const juce::StringArray& files, int, int)
+{
+    dropHover = false;
+    for (const auto& f : files)
+    {
+        const juce::File file (f);
+        if (! file.hasFileExtension ("wav;aif;aiff;mp3;flac;m4a;ogg;caf")) continue;
+        if (proc.loadSample (file))
+        {
+            peaks = proc.getPeaks();
+            name = proc.getSampleName();
+            message = {};
+        }
+        else
+        {
+            message = "COULD NOT READ " + file.getFileName().toUpperCase();
+            messageTicks = 90;
+        }
+        break; // one sample at a time
+    }
+    repaint();
+}
+
 void WaveformView::timerCallback()
 {
+    if (messageTicks > 0 && --messageTicks == 0) { message = {}; repaint(); }
     const float pos = proc.apvts.getRawParameterValue ("position")->load();
     const float spray = proc.apvts.getRawParameterValue ("spray")->load();
     const auto n = proc.getSampleName();
@@ -63,7 +95,23 @@ void WaveformView::paint (juce::Graphics& g)
     g.setColour (look::dim);
     g.setFont (look::caps (10.5f, true, 0.12f));
     g.drawText (name.toUpperCase(), getLocalBounds().reduced (14, 6), juce::Justification::topLeft, false);
+    g.drawText ("DROP A SAMPLE HERE", getLocalBounds().reduced (14, 6), juce::Justification::topRight, false);
     g.drawText ("CLICK / DRAG = POSITION", getLocalBounds().reduced (14, 6), juce::Justification::bottomRight, false);
+    if (message.isNotEmpty())
+    {
+        g.setColour (look::accent);
+        g.drawText (message, getLocalBounds().reduced (14, 6), juce::Justification::bottomLeft, false);
+    }
+
+    if (dropHover)
+    {
+        g.setColour (look::accent.withAlpha (0.14f));
+        g.fillRoundedRectangle (r, 8.f);
+        g.setColour (look::accent);
+        g.drawRoundedRectangle (r.reduced (1.f), 8.f, 2.f);
+        g.setFont (look::caps (16.f, true, 0.25f));
+        g.drawText ("DROP TO LOAD", getLocalBounds(), juce::Justification::centred, false);
+    }
 }
 
 void WaveformView::setPositionFrom (const juce::MouseEvent& e)

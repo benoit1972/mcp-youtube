@@ -3,10 +3,16 @@
 #include "PluginProcessor.h"
 
 // Waveform of the loaded sample with the grain position / spray range; click or drag to set the position.
-class WaveformView : public juce::Component, private juce::Timer
+class WaveformView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     explicit WaveformView (GlitchGrainProcessor&);
+
+    // drag & drop an audio file from the Finder onto the waveform to load it
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override { dropHover = true; repaint(); }
+    void fileDragExit (const juce::StringArray&) override { dropHover = false; repaint(); }
+    void filesDropped (const juce::StringArray& files, int, int) override;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -20,7 +26,9 @@ private:
     std::vector<float> peaks;
     juce::String name;
     float lastPos = -1.f, lastSpray = -1.f;
-    bool dragging = false;
+    bool dragging = false, dropHover = false;
+    juce::String message;   // short feedback (e.g. unreadable file), shown for ~3 s
+    int messageTicks = 0;
 };
 
 class PoomseGlitchEditor : public juce::AudioProcessorEditor

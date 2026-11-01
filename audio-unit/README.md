@@ -10,7 +10,7 @@ Trois pages (onglets **Grain / Play / FX**) pour garder l'écran d'accueil lége
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.
 
 Bouton **Random** : tire au hasard tous les paramètres (sauf *Level*, pour protéger les oreilles) dans des plages musicales.
-Bouton **Load** : charge un échantillon audio. Double-clic sur un potard : valeur par défaut.
+**Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger ; le bouton **Load** reste disponible en secours. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement
 
