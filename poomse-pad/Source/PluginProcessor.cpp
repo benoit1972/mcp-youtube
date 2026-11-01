@@ -257,6 +257,29 @@ void PoomsePadProcessor::resetToDefaults()
     for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
         for (int d = 0; d < gg::kNumDests; ++d)
             setMatrix (sIdx, d, 0.f);
+    currentPreset.store (0);
+}
+
+void PoomsePadProcessor::applyPreset (int index)
+{
+    const auto& list = pad::presets();
+    if (index < 0 || index >= (int) list.size()) return;
+
+    resetToDefaults();
+    const auto& pr = list[(size_t) index];
+    for (const auto& p : pr.params)
+        if (auto* rp = apvts.getParameter (p.id))
+        {
+            rp->beginChangeGesture();
+            rp->setValueNotifyingHost (rp->convertTo0to1 (p.value));
+            rp->endChangeGesture();
+        }
+    for (const auto& m : pr.mods)
+    {
+        const int d = gg::destIndexOf (m.dest);
+        if (d > 0) setMatrix (m.src, d - 1, m.amount);
+    }
+    currentPreset.store (index);
 }
 
 juce::AudioProcessorEditor* PoomsePadProcessor::createEditor() { return new PoomsePadEditor (*this); }
@@ -264,6 +287,7 @@ juce::AudioProcessorEditor* PoomsePadProcessor::createEditor() { return new Poom
 void PoomsePadProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     apvts.state.setProperty ("matrix", serialiseMatrix(), nullptr);
+    apvts.state.setProperty ("preset", currentPreset.load(), nullptr);
     if (auto xml = apvts.copyState().createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -275,6 +299,7 @@ void PoomsePadProcessor::setStateInformation (const void* data, int size)
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             restoreMatrix (apvts.state.getProperty ("matrix").toString());
+            currentPreset.store (juce::jlimit (0, getNumPresets() - 1, (int) apvts.state.getProperty ("preset", 0)));
         }
 }
 

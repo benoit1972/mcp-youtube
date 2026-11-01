@@ -325,6 +325,7 @@ PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
         else
         {
             proc.resetToDefaults();
+            presetBox.setSelectedItemIndex (0, juce::dontSendNotification); // Reset = the "Init" preset
             disarmReset();
         }
     };
@@ -334,8 +335,32 @@ PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
     holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "hold", holdButton);
     addAndMakeVisible (holdButton);
 
+    // preset menu: < [ name v ] >
+    for (int i = 0; i < PoomsePadProcessor::getNumPresets(); ++i)
+        presetBox.addItem (PoomsePadProcessor::getPresetName (i), i + 1);
+    presetBox.setSelectedItemIndex (proc.getCurrentPreset(), juce::dontSendNotification);
+    presetBox.onChange = [this]
+    {
+        const int i = presetBox.getSelectedItemIndex();
+        if (i >= 0) proc.applyPreset (i);
+    };
+    prevPreset.setComponentID ("pill");
+    nextPreset.setComponentID ("pill");
+    prevPreset.onClick = [this] { stepPreset (-1); };
+    nextPreset.onClick = [this] { stepPreset (+1); };
+    addAndMakeVisible (presetBox);
+    addAndMakeVisible (prevPreset);
+    addAndMakeVisible (nextPreset);
+
     setSize (kWidth, kHeight);
     showPage (0);
+}
+
+void PoomsePadEditor::stepPreset (int delta)
+{
+    const int n = PoomsePadProcessor::getNumPresets();
+    const int i = ((presetBox.getSelectedItemIndex() + delta) % n + n) % n;
+    presetBox.setSelectedItemIndex (i, juce::sendNotificationSync); // onChange applies it
 }
 
 PoomsePadEditor::~PoomsePadEditor() { setLookAndFeel (nullptr); }
@@ -408,7 +433,10 @@ void PoomsePadEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
     resetButton.setBounds (randomButton.getX() - 10 - 90, 18, 90, 30);
-    holdButton.setBounds (resetButton.getX() - 10 - 80, 18, 80, 30);
+    holdButton.setBounds (resetButton.getX() - 8 - 70, 18, 70, 30);
+    prevPreset.setBounds (244, 18, 26, 30);
+    presetBox.setBounds (274, 18, 150, 30);
+    nextPreset.setBounds (428, 18, 26, 30);
     for (int i = 0; i < 4; ++i)
         tabButtons[i].setBounds (kPad + i * 88, 66, 80, 30);
 

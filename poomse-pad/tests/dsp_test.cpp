@@ -4,6 +4,9 @@
 #include "../Source/Dsp/ModMatrix.h"
 #include "../Source/Dsp/Modulators.h"
 #include "../Source/Dsp/Util.h"
+#include "../Source/Dsp/Presets.h"
+#include <set>
+#include <string>
 #include <cstdio>
 #include <memory>
 
@@ -292,6 +295,51 @@ int main()
     // ---- output limiter ----
     CHECK (gg::softClip (0.5f) == 0.5f && gg::softClip (-0.79f) == -0.79f);
     CHECK (gg::softClip (5.f) <= 1.0f && gg::softClip (-5.f) >= -1.0f);
+
+    // ---- factory presets ----
+    {
+        const auto& list = pad::presets();
+        CHECK (list.size() >= 12);
+        CHECK (std::string (list[0].name) == "Init" && list[0].params.empty() && list[0].mods.empty());
+
+        // every parameter id a preset sets must exist in the plugin, with a value inside that parameter's range
+        struct Known { const char* id; float lo, hi; };
+        static const Known known[] = {
+            { "time", 0.1f, 60.f }, { "rise", 0.02f, 10.f }, { "sub", 0.f, 1.f }, { "body", 0.f, 1.f }, { "fifth", 0.f, 1.f },
+            { "octave", 0.f, 1.f }, { "evolve", 0.f, 1.f }, { "rate", 0.01f, 1.f }, { "tone", -1.f, 1.f }, { "width", 0.f, 1.f },
+            { "revSize", 0.f, 1.f }, { "revMix", 0.f, 1.f }, { "mix", 0.f, 1.f }, { "level", -48.f, 6.f },
+            { "lfo1Rate", 0.02f, 20.f }, { "lfo1Sync", 0.f, 5.f }, { "lfo1Shape", 0.f, 4.f },
+            { "lfo2Rate", 0.02f, 20.f }, { "lfo2Sync", 0.f, 5.f }, { "lfo2Shape", 0.f, 4.f },
+            { "seqSteps", 1.f, 16.f }, { "seqHits", 0.f, 16.f }, { "seqRot", 0.f, 15.f }, { "seqRate", 0.f, 6.f },
+            { "seqDecay", 0.01f, 2.f }, { "seqRandom", 0.f, 1.f },
+        };
+        std::set<std::string> names;
+        for (const auto& pr : list)
+        {
+            CHECK (names.insert (pr.name).second);                      // unique names
+            for (const auto& p : pr.params)
+            {
+                bool found = false;
+                for (const auto& k : known)
+                    if (std::string (k.id) == p.id) { found = true; CHECK (p.value >= k.lo && p.value <= k.hi); }
+                CHECK (found);
+            }
+            for (const auto& m : pr.mods)
+            {
+                CHECK (m.src >= 0 && m.src < gg::kNumSources);
+                CHECK (gg::destIndexOf (m.dest) > 0);
+                CHECK (std::abs (m.amount) > 0.f && std::abs (m.amount) <= 1.f);
+            }
+        }
+        // the six shared macros are on every preset except Init, and no preset touches hold
+        for (size_t i = 1; i < list.size(); ++i)
+        {
+            int macroCells = 0;
+            for (const auto& m : list[i].mods) macroCells += m.src < gg::kNumMacros;
+            CHECK (macroCells == 11);
+            for (const auto& p : list[i].params) CHECK (std::string (p.id) != "hold");
+        }
+    }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);
     return fails == 0 ? 0 : 1;

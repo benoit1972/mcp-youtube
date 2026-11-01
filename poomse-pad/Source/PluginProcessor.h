@@ -3,6 +3,7 @@
 #include "Dsp/ModMatrix.h"
 #include "Dsp/Modulators.h"
 #include "Dsp/PadReverb.h"
+#include "Dsp/Presets.h"
 #include "Dsp/SpectralPad.h"
 #include "Dsp/Util.h"
 
@@ -44,6 +45,12 @@ public:
     // Message thread: every parameter back to its default and the matrix completely empty.
     void resetToDefaults();
 
+    // Factory presets (message thread). Applying one starts from the neutral defaults, then sets the preset.
+    static int getNumPresets() { return (int) pad::presets().size(); }
+    static juce::String getPresetName (int i) { return pad::presets()[(size_t) i].name; }
+    void applyPreset (int index);
+    int getCurrentPreset() const { return currentPreset.load(); }
+
     // Modulation matrix (source x destination amount, -1..1). Thread-safe, edited from the UI.
     float getMatrix (int src, int dest) const { return matrix[(size_t) (src * gg::kNumDests + dest)].load(); }
     void setMatrix (int src, int dest, float v)
@@ -67,6 +74,7 @@ private:
     juce::SmoothedValue<float> levelSmooth, mixSmooth;
     double currentSampleRate = 48000.0;
     int reverbCounter = 0;
+    std::atomic<int> currentPreset { 0 };
 
     std::array<std::atomic<float>*, gg::kNumMacros> macroRaw {};
     std::atomic<float>* lfoRaw[2][3] {};   // rate, sync, shape

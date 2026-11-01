@@ -87,6 +87,7 @@ private:
                  std::initializer_list<std::pair<const char*, const char*>> params);
     void showPage (int index);
     void disarmReset();
+    void stepPreset (int delta);
 
     PoomseLookAndFeel laf;
     PoomsePadProcessor& proc;
@@ -99,6 +100,8 @@ private:
     ModMatrixView matrixView;
     juce::TextButton tabButtons[4];
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" };
+    juce::TextButton prevPreset { "<" }, nextPreset { ">" };
+    juce::ComboBox presetBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
     bool resetArmed = false;
 

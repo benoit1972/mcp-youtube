@@ -20,6 +20,8 @@ aléatoires** : les attaques disparaissent, la matière devient continue, et l'h
 - **Matrix** : grille paramètre × source (M1-M8, LFO1, LFO2, SEQ). Glisse une case vers le haut/bas pour régler la quantité (Maj = précis),
   double-clic = effacer, molette = défiler. Turquoise = positif, ambre = négatif. La matrice est **vide** au départ.
 
+Menu **presets** (en haut, avec flèches < >) : 13 presets d'usine, de « Warm Pad » à « Pulsing Choir », certains avec LFO et séquenceur déjà câblés. Chacun part des réglages neutres, puis règle le pad ; tous (sauf *Init*) donnent aussi 6 macros utiles : Macro 1 espace, 2 brillance, 3 mouvement, 4 plus long et plus doux, 5 profondeur, 6 largeur.
+
 Boutons du haut : **Hold** (fige le spectre : le pad dure indéfiniment), **Reset** (deux clics : tout à la valeur par défaut, matrice vidée),
 **Random** (agit sur la page affichée, Maj = Pad + Tone ; sur Mod/Matrix il donne aux 8 macros des cibles et des valeurs aléatoires ;
 *Mix*, *Level* et *Hold* ne sont jamais touchés).
