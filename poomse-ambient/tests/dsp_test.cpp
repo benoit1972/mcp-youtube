@@ -295,15 +295,27 @@ int main()
             if (test == 1) CHECK (g > 0.9);           // bass is left alone
             if (test == 2) CHECK (g > 0.95);          // amount 0 = open
         }
-        // Crackle: silent at 0, pops and hiss at 1, bounded
+        // Crackle: silent at 0, and the first percent is practically inaudible; it grows steadily up to a worn record
         {
-            amb::Crackle c; c.prepare (sr);
-            std::vector<float> o ((size_t) sr * 5); double peak = 0; int pops = 0;
-            for (int i = 0; i < (int) sr * 5; ++i) { float l, r; c.process (1.f, l, r); o[(size_t) i] = l; peak = std::max (peak, (double) std::abs (l)); if (std::abs (l) > 0.15f && (i == 0 || std::abs (o[(size_t) i - 1]) <= 0.15f)) ++pops; }
-            std::printf ("crackle: peak %.2f, about %d pops per second\n", peak, pops / 5);
-            CHECK (peak > 0.1 && peak < 1.5 && pops / 5 >= 3);
-            amb::Crackle z; z.prepare (sr); double e = 0; for (int i = 0; i < (int) sr; ++i) { float l, r; z.process (0.f, l, r); e += std::abs (l) + std::abs (r); }
-            CHECK (e == 0.0);
+            auto run = [&] (float amount, double seconds, double& peak, double& popsPerSec, double& rms)
+            {
+                amb::Crackle c; c.prepare (sr);
+                const int total = (int) (sr * seconds); std::vector<float> o ((size_t) total); double acc = 0; int pops = 0; peak = 0;
+                for (int i = 0; i < total; ++i)
+                {
+                    float l, r; c.process (amount, l, r); o[(size_t) i] = l; peak = std::max (peak, (double) std::abs (l)); acc += (double) l * l;
+                    if (std::abs (l) > 0.08f && (i == 0 || std::abs (o[(size_t) i - 1]) <= 0.08f)) ++pops;
+                }
+                popsPerSec = pops / seconds; rms = std::sqrt (acc / total);
+            };
+            double pk0, p0, r0, pk1, p1, r1, pk25, p25, r25, pk50, p50, r50, pk100, p100, r100;
+            run (0.f, 20, pk0, p0, r0); run (0.01f, 20, pk1, p1, r1); run (0.25f, 20, pk25, p25, r25); run (0.5f, 20, pk50, p50, r50); run (1.f, 20, pk100, p100, r100);
+            std::printf ("crackle pops per second: 0%% %.2f, 1%% %.2f, 25%% %.2f, 50%% %.2f, 100%% %.2f (peaks %.2f / %.2f / %.2f / %.2f)\n", p0, p1, p25, p50, p100, pk1, pk25, pk50, pk100);
+            CHECK (pk0 == 0.0);
+            CHECK (p1 < 0.2 && r1 < 1e-4);                 // 1 %: you would not notice it
+            CHECK (p25 > 0.4 && p25 < 4.0);                // 25 %: a gentle, occasional crackle
+            CHECK (p50 > p25 && p100 > p50 && p100 >= 10.0);  // it keeps growing, up to an old record
+            CHECK (pk100 > 0.4 && pk100 < 1.6);
         }
         // Tape: bounded and finite, silence stays silence
         {

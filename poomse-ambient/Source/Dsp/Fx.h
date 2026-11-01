@@ -31,18 +31,23 @@ class Crackle
 {
 public:
     void prepare (double sampleRate, uint32_t seed = 0xBEEFu) { sr = sampleRate; rng = gg::Rng (seed); popL = popR = 0.f; hissL = hissR = 0.f; }
+    // The amount follows a curve that stays almost silent at the bottom of the knob: the number of pops grows
+    // with the square of the amount (1 % = practically none, 25 % = a pop every second or so, 100 % = a worn record),
+    // and a pop that does happen is always at least a little audible.
     void process (float amount, float& l, float& r)
     {
         amount = std::clamp (amount, 0.f, 1.f);
         l = r = 0.f;
-        if (amount <= 0.001f) { popL *= 0.9f; popR *= 0.9f; return; }
-        const float pPop = (0.00004f + 0.00035f * amount) * (48000.f / (float) sr);
-        if (rng.uni() < pPop) { const float a = rng.uni(); popL += (rng.bi() < 0.f ? -1.f : 1.f) * a * a * (0.25f + 0.6f * amount); }
-        if (rng.uni() < pPop) { const float a = rng.uni(); popR += (rng.bi() < 0.f ? -1.f : 1.f) * a * a * (0.25f + 0.6f * amount); }
+        const float shaped = amount * amount;
+        if (shaped < 1e-6f) { popL *= 0.9f; popR *= 0.9f; return; }
+        const float pPop = 0.0005f * shaped * (48000.f / (float) sr);
+        const float size = 0.15f + 0.7f * amount;
+        if (rng.uni() < pPop) { const float a = rng.uni(); popL += (rng.bi() < 0.f ? -1.f : 1.f) * (0.3f + 0.7f * a * a) * size; }
+        if (rng.uni() < pPop) { const float a = rng.uni(); popR += (rng.bi() < 0.f ? -1.f : 1.f) * (0.3f + 0.7f * a * a) * size; }
         l = popL; r = popR;
         popL *= 0.82f; popR *= 0.82f;                                  // a pop lasts about a millisecond
         hissL += 0.2f * (rng.bi() - hissL); hissR += 0.2f * (rng.bi() - hissR);
-        l += hissL * 0.012f * amount; r += hissR * 0.012f * amount;
+        l += hissL * 0.012f * shaped; r += hissR * 0.012f * shaped;    // the hiss only exists at higher amounts
     }
 private:
     double sr = 48000.0;
