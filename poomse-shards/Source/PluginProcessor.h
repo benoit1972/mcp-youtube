@@ -20,7 +20,7 @@ public:
     const juce::String getName() const override { return "Poomse Shards"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
-    double getTailLengthSeconds() const override { return 1.5; }
+    double getTailLengthSeconds() const override { return 1.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -36,13 +36,14 @@ public:
     void useBuiltInBreak();
     juce::String getBreakName() const;
 
-    struct Mark { float x, y, w, level; };               // one piece of the break, on the map
-    struct View { std::vector<float> peaks; std::vector<Mark> marks; };
+    struct Mark { float x, y, w, level; };               // one hit of the loop, on the map (x = place in the loop)
+    struct View { std::vector<float> peaks; std::vector<Mark> marks; float origin = 0.f; };
     View getView() const;
     int getViewVersion() const { return viewVersion.load(); }
 
+    void uiNote (int note, bool on);                      // the pads of the interface play like keys
     void randomise();
-    void newEdits();                                      // another seed: the same bar breaks in another way
+    void newEdits();                                      // another seed: the same bar breaks in other ways
     void resetToDefaults();
     static int getNumPresets();
     static juce::String getPresetName (int i);
@@ -52,16 +53,20 @@ public:
     // ---- display ----
     int getHitCount() const { return engine.hitCount(); }
     int getHit (int i) const { return engine.hitAt (i); }
+    float getLoopPhase() const { return engine.loopPhase(); }
+    int getActiveFlavours() const { return engine.activeFlavours(); }
 
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void publish (std::shared_ptr<const sh::Kit> k);
+    sh::Params readParams() const;
 
     sh::Engine engine;
     juce::SmoothedValue<float> levelS;
     double currentSampleRate = 48000.0, internalBeat = 0.0;
+    int lastBars = -1;
     std::atomic<int> currentPreset { 0 };
 
     juce::SpinLock kitLock;
@@ -71,7 +76,11 @@ private:
     View view;
     std::atomic<int> viewVersion { 0 };
 
-    std::atomic<float>* raw[10] {};   // place shatter grid ramp scatter fall snap tune level seed
+    struct UiNote { int note; bool on; };
+    juce::AbstractFifo uiFifo { 64 };
+    std::array<UiNote, 64> uiNotes {};
+
+    std::atomic<float>* raw[16] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseShardsProcessor)
 };

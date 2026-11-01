@@ -2,17 +2,14 @@
 #include "Look.h"
 #include "PluginProcessor.h"
 
-// The map. Every dot is a piece of the break: across = the place in the break, up = how bright it sounds (kicks at the bottom,
-// hats at the top). A key plays the dot at its height, near the vertical line. Every hit that plays lights its dot.
-// Below the map, the break itself with its cuts. Drop a drum loop anywhere on it.
+// The loop, seen as a map: every dot is a hit of the break (across = its place in the loop, up = how bright it sounds, kicks at
+// the bottom, hats at the top). The line is the playhead. Every hit that sounds lights its dot: a roll, a backwards hit, a ghost
+// each have their own mark, so the damage can be seen as it happens. Below, the break itself. Drop a drum loop on it.
 class BreakView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     explicit BreakView (PoomseShardsProcessor&);
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
-    void mouseDrag (const juce::MouseEvent&) override;
-    void mouseUp (const juce::MouseEvent&) override;
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void fileDragEnter (const juce::StringArray&, int, int) override { dropHover = true; repaint(); }
     void fileDragExit (const juce::StringArray&) override { dropHover = false; repaint(); }
@@ -20,23 +17,39 @@ public:
 
 private:
     void timerCallback() override;
+    void pollHits();
     juce::Rectangle<float> mapArea() const;
     juce::Rectangle<float> stripArea() const;
-    void setFromMouse (juce::Point<float>);
-    void gesture (bool begin);
-    void pollHits();
 
     PoomseShardsProcessor& proc;
     PoomseShardsProcessor::View view;
-    int seenVersion = -1;
+    int seenVersion = -1, hitsSeen = 0, messageTicks = 0;
     juce::String name, message;
-    int messageTicks = 0;
-    bool dropHover = false, dragging = false;
-    int hitsSeen = 0;
-    std::vector<float> glow, glowFragment;
+    bool dropHover = false;
+    std::vector<float> glow, glowRoll, glowRev, glowGhost;
 };
 
-class PoomseShardsEditor : public juce::AudioProcessorEditor
+// A pad: held with the mouse like a key is held on the keyboard.
+class PadButton : public juce::Component
+{
+public:
+    PadButton (PoomseShardsProcessor& p, int noteNumber, juce::String text, juce::String sub, bool smallPad)
+        : proc (p), note (noteNumber), label (std::move (text)), subLabel (std::move (sub)), small (smallPad) {}
+    void setLit (bool on) { if (on != lit) { lit = on; repaint(); } }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { down = true; proc.uiNote (note, true); repaint(); }
+    void mouseUp (const juce::MouseEvent&) override { down = false; proc.uiNote (note, false); repaint(); }
+    void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
+
+private:
+    PoomseShardsProcessor& proc;
+    int note;
+    juce::String label, subLabel;
+    bool small, lit = false, down = false, hover = false;
+};
+
+class PoomseShardsEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit PoomseShardsEditor (PoomseShardsProcessor&);
@@ -54,11 +67,13 @@ private:
     Knob& makeKnob (const juce::String& paramId, const juce::String& text);
     void disarmReset();
     void stepPreset (int delta);
+    void timerCallback() override;
 
     PaperLookAndFeel laf;
     PoomseShardsProcessor& proc;
     BreakView breakView;
     juce::OwnedArray<Knob> knobs;
+    juce::OwnedArray<PadButton> fillPads, keyPads;
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, editsButton { "New edits" };
     juce::TextButton prevPreset { "<" }, nextPreset { ">" };
     juce::ComboBox presetBox;

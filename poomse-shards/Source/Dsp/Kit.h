@@ -170,15 +170,16 @@ struct Kit
 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// The break you get before dropping your own: four bars of a broken, syncopated pattern at 92 bpm made of soft round
-// kicks, cracked snares with ghost notes, ticking hats, rims, toms and a few glassy pings. Made on the spot.
+// The break you get before dropping your own: a plain "boom, tchak" with a hat in the air. Two bars at 90 bpm: a soft round kick,
+// a cracked snare on 2 and 4, hats on the off-beats (the last one open). Made on the spot. Simple on purpose: the plugin is
+// there to make something of it.
 struct TruthHit { double time; int kind; };   // kind: 0 kick, 1 snare, 2 hat, 3 other
 
 namespace detail
 {
 inline void kick (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp)
 {
-    const double f0 = 50.0 + 9.0 * r.uni(), f1 = f0 * 2.7, decay = 0.1 + 0.04 * r.uni();
+    const double f0 = 52.0 + 3.0 * r.uni(), f1 = f0 * 2.7, decay = 0.11 + 0.01 * r.uni();
     double ph = 0.0;
     const int len = (int) (0.5 * sr);
     for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
@@ -190,11 +191,11 @@ inline void kick (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float
         b[at + (size_t) i] += (float) (amp * s);
     }
 }
-inline void snare (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp, bool ghost)
+inline void snare (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp)
 {
-    const double f = 175.0 + 40.0 * r.uni(), body = ghost ? 0.035 : 0.08, tail = ghost ? 0.05 : 0.12;
+    const double f = 180.0 + 6.0 * r.uni(), body = 0.08, tail = 0.12;
     float lp = 0.f;
-    const int len = (int) ((ghost ? 0.2 : 0.4) * sr);
+    const int len = (int) (0.4 * sr);
     for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
     {
         const double t = i / sr;
@@ -208,7 +209,7 @@ inline void snare (std::vector<float>& b, size_t at, double sr, gg::Rng& r, floa
 inline void hat (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp, bool open)
 {
     float lp = 0.f;
-    const double dec = open ? 0.11 : 0.016 + 0.01 * r.uni();
+    const double dec = open ? 0.11 : 0.02;
     const int len = (int) ((open ? 0.45 : 0.1) * sr);
     for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
     {
@@ -220,73 +221,35 @@ inline void hat (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float 
         b[at + (size_t) i] += (float) (amp * 0.55 * s);
     }
 }
-inline void rim (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp)
-{
-    const int len = (int) (0.08 * sr);
-    for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
-    {
-        const double t = i / sr;
-        b[at + (size_t) i] += (float) (amp * (0.6 * std::sin (6.283185307179586 * 1150.0 * t) * std::exp (-t / 0.012) + 0.35 * r.bi() * std::exp (-t / 0.006)));
-    }
-}
-inline void tom (std::vector<float>& b, size_t at, double sr, gg::Rng&, float amp, double f)
-{
-    double ph = 0.0;
-    const int len = (int) (0.35 * sr);
-    for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
-    {
-        const double t = i / sr;
-        ph += 6.283185307179586 * f * (1.0 + 0.45 * std::exp (-t / 0.05)) / sr;
-        b[at + (size_t) i] += (float) (amp * 0.8 * std::sin (ph) * std::exp (-t / 0.14));
-    }
-}
-inline void ping (std::vector<float>& b, size_t at, double sr, gg::Rng& r, float amp)
-{
-    const double f = 2200.0 + 1100.0 * r.uni();
-    const int len = (int) (0.4 * sr);
-    for (int i = 0; i < len && at + (size_t) i < b.size(); ++i)
-    {
-        const double t = i / sr;
-        const double idx = 1.8 * std::exp (-t / 0.05);
-        b[at + (size_t) i] += (float) (amp * 0.4 * std::sin (6.283185307179586 * f * t + idx * std::sin (6.283185307179586 * f * 1.5 * t)) * std::exp (-t / 0.12));
-    }
-}
 } // namespace detail
 
 inline Kit makeDefaultKit (double sr = 44100.0, std::vector<TruthHit>* truth = nullptr)
 {
     Kit k;
     k.sampleRate = sr;
-    const double step = 60.0 / 92.0 / 4.0;
-    constexpr int bars = 4, steps = 16;
-    k.x.assign ((size_t) ((bars * steps * step + 1.0) * sr), 0.f);
-    static const char* kick[bars]  = { "k..k..k...k.....", "k....k..k..k.k..", "k..k.....k.....k", "k.k....k..k...k." };
-    static const char* snare[bars] = { "....s.......s...", "....s.......s..g", "....s..g....s...", "....s..g....s.g." };
-    static const char* extra[bars] = { "..........p.....", "......r.........", "......r.....o...", "..p..........ttt" };
-    gg::Rng rng (0xD12Au);
+    const double step = 60.0 / 90.0 / 4.0;
+    constexpr int bars = 2, steps = 16;
+    k.x.assign ((size_t) ((bars * steps * step + 0.5) * sr), 0.f);
+    static const char* kick[bars]  = { "k......k........", "k......k...k...." };
+    static const char* snare[bars] = { "....s.......s...", "....s.......s..." };
+    static const char* hats[bars]  = { "..h...h...h...o.", "..h...h...h...o." };
+    gg::Rng rng (0xB00Du);
     for (int bar = 0; bar < bars; ++bar)
         for (int st = 0; st < steps; ++st)
         {
             const double t = ((double) bar * steps + st) * step;
             const size_t at = (size_t) (t * sr);
-            const char kc = kick[bar][st], sc = snare[bar][st], ec = extra[bar][st];
             int kind = -1;
-            if (kc == 'k')
-            {
-                detail::kick (k.x, at, sr, rng, 0.9f - 0.15f * rng.uni()); kind = 0;
-            }
-            else if (sc == 's')       { detail::snare (k.x, at, sr, rng, 0.8f - 0.1f * rng.uni(), false); kind = 1; }
-            else if (sc == 'g')       { detail::snare (k.x, at, sr, rng, 0.55f, true); kind = 1; }
-            else if (ec == 'p')       { detail::ping (k.x, at, sr, rng, 0.8f); kind = 3; }
-            else if (ec == 'r')       { detail::rim (k.x, at, sr, rng, 0.7f); kind = 3; }
-            else if (ec == 'o')       { detail::hat (k.x, at, sr, rng, 0.75f, true); kind = 2; }
-            else if (ec == 't')       { detail::tom (k.x, at, sr, rng, 0.8f, st == 13 ? 150.0 : st == 14 ? 118.0 : 92.0); kind = 3; }
-            else if (st % 2 == 1 || st == 6 || st == 10)   // ticking hats on the off steps
-            {
-                detail::hat (k.x, at, sr, rng, (st % 4 == 3 ? 0.8f : 0.55f) + 0.15f * rng.uni(), false); kind = 2;
-            }
+            if (kick[bar][st] == 'k')       { detail::kick (k.x, at, sr, rng, 0.9f); kind = 0; }
+            else if (snare[bar][st] == 's') { detail::snare (k.x, at, sr, rng, 0.8f); kind = 1; }
+            else if (hats[bar][st] == 'h')  { detail::hat (k.x, at, sr, rng, 0.7f, false); kind = 2; }
+            else if (hats[bar][st] == 'o')  { detail::hat (k.x, at, sr, rng, 0.8f, true); kind = 2; }
             if (kind >= 0 && truth != nullptr) truth->push_back ({ t, kind });
         }
+    // a loop is a circle: what rings on after the end comes back in at the start
+    const size_t loopLen = (size_t) (bars * steps * step * sr);
+    for (size_t i = loopLen; i < k.x.size(); ++i) k.x[i - loopLen] += k.x[i];
+    k.x.resize (loopLen);
     float peak = 1e-6f;
     for (float v : k.x) peak = std::max (peak, std::abs (v));
     for (float& v : k.x) v *= 0.9f / peak;

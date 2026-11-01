@@ -2,9 +2,10 @@
 
 namespace
 {
-constexpr int kWidth = 780, kHeight = 640, kPad = 28;
+constexpr int kWidth = 780, kHeight = 710, kPad = 28;
 constexpr float kInset = 10.f;
 const char* const kAudioExt = "wav;aif;aiff;mp3;flac;m4a;ogg;caf";
+const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 }
 
 //==============================================================================
@@ -15,8 +16,8 @@ BreakView::BreakView (PoomseShardsProcessor& p) : proc (p)
     startTimerHz (30);
 }
 
-juce::Rectangle<float> BreakView::mapArea() const   { return getLocalBounds().toFloat().withTrimmedBottom (66.f); }
-juce::Rectangle<float> BreakView::stripArea() const { return getLocalBounds().toFloat().removeFromBottom (56.f); }
+juce::Rectangle<float> BreakView::mapArea() const   { return getLocalBounds().toFloat().withTrimmedBottom (62.f); }
+juce::Rectangle<float> BreakView::stripArea() const { return getLocalBounds().toFloat().removeFromBottom (52.f); }
 
 void BreakView::pollHits()
 {
@@ -25,11 +26,14 @@ void BreakView::pollHits()
     {
         const int h = proc.getHit (i);
         const size_t idx = (size_t) (h & 0xffff);
-        if (idx < glow.size()) { if (h & 0x10000) glowFragment[idx] = 1.f; else glow[idx] = 1.f; }
+        if (idx >= glow.size()) continue;
+        if (h & 0x40000) glowGhost[idx] = 1.f;
+        else if (h & 0x10000) glowRoll[idx] = 1.f;
+        else glow[idx] = 1.f;
+        if (h & 0x20000) glowRev[idx] = 1.f;
     }
     hitsSeen = count;
-    for (auto& g : glow) g *= 0.9f;
-    for (auto& g : glowFragment) g *= 0.88f;
+    for (size_t i = 0; i < glow.size(); ++i) { glow[i] *= 0.9f; glowRoll[i] *= 0.88f; glowRev[i] *= 0.92f; glowGhost[i] *= 0.88f; }
 }
 
 void BreakView::timerCallback()
@@ -38,7 +42,8 @@ void BreakView::timerCallback()
     if (v != seenVersion)
     {
         view = proc.getView(); seenVersion = v; name = proc.getBreakName();
-        glow.assign (view.marks.size(), 0.f); glowFragment.assign (view.marks.size(), 0.f);
+        const size_t n = view.marks.size();
+        glow.assign (n, 0.f); glowRoll.assign (n, 0.f); glowRev.assign (n, 0.f); glowGhost.assign (n, 0.f);
         hitsSeen = proc.getHitCount();
     }
     pollHits();
@@ -65,22 +70,6 @@ void BreakView::filesDropped (const juce::StringArray& files, int, int)
     repaint();
 }
 
-void BreakView::gesture (bool begin)
-{
-    if (auto* p = proc.apvts.getParameter ("place")) { if (begin) p->beginChangeGesture(); else p->endChangeGesture(); }
-}
-
-void BreakView::setFromMouse (juce::Point<float> pt)
-{
-    const auto m = mapArea().reduced (kInset);
-    const float x = juce::jlimit (0.f, 1.f, (pt.x - m.getX()) / m.getWidth());
-    if (auto* p = proc.apvts.getParameter ("place")) p->setValueNotifyingHost (p->convertTo0to1 (x));
-}
-
-void BreakView::mouseDown (const juce::MouseEvent& e) { dragging = true; gesture (true); setFromMouse (e.position); }
-void BreakView::mouseDrag (const juce::MouseEvent& e) { if (dragging) setFromMouse (e.position); }
-void BreakView::mouseUp (const juce::MouseEvent&)      { if (dragging) gesture (false); dragging = false; }
-
 void BreakView::paint (juce::Graphics& g)
 {
     const auto all = getLocalBounds().toFloat();
@@ -89,40 +78,38 @@ void BreakView::paint (juce::Graphics& g)
 
     const auto mapR = mapArea(), m = mapR.reduced (kInset), strip = stripArea().reduced (kInset, 6.f);
     auto px = [&] (float x01) { return m.getX() + x01 * m.getWidth(); };
-    auto py = [&] (float y01) { return m.getBottom() - y01 * m.getHeight(); };
+    auto py = [&] (float y01) { return m.getBottom() - 6.f - y01 * (m.getHeight() - 12.f); };
 
-    // faint ruling; the five horizontal lines are the octaves of the keyboard, C1 at the bottom to C5 at the top
     g.setColour (look::rule);
-    for (int i = 0; i <= 8; ++i) g.fillRect (px ((float) i / 8.f) - 0.5f, m.getY(), 1.f, m.getHeight());
-    for (int i = 0; i <= 4; ++i) g.fillRect (m.getX(), py ((float) i / 4.f) - 0.5f, m.getWidth(), 1.f);
+    for (int i = 0; i <= 16; ++i) g.fillRect (px ((float) i / 16.f) - 0.5f, m.getY(), 1.f, m.getHeight());      // (the 1/16 grid of the loop)
+    for (int i = 0; i <= 2; ++i)  g.fillRect (m.getX(), py ((float) i / 2.f) - 0.5f, m.getWidth(), 1.f);
 
-    const float place = proc.apvts.getRawParameterValue ("place")->load();
-
-    // the band the hits are taken from, and its line
-    const float cx = px (place);
-    g.setColour (look::accent.withAlpha (0.07f));
-    g.fillRect (juce::Rectangle<float> (cx - 24.f, m.getY(), 48.f, m.getHeight()));
-    g.setColour (look::accent.withAlpha (0.55f));
-    g.fillRect (cx - 0.5f, m.getY(), 1.f, m.getHeight());
-
-    // the pieces of the break
+    // the hits of the loop
     for (size_t i = 0; i < view.marks.size(); ++i)
     {
         const auto& k = view.marks[i];
-        const float r = 2.f + 4.f * k.level;
-        const float gl = i < glow.size() ? glow[i] : 0.f, gf = i < glowFragment.size() ? glowFragment[i] : 0.f;
-        if (gl > 0.02f || gf > 0.02f)
+        const float r = 2.5f + 4.f * k.level;
+        const float cx = px (k.x), cy = py (k.y);
+        const float gl = glow[i], gr = glowRoll[i], gh = glowGhost[i], rv = glowRev[i];
+        const float a = std::max ({ gl, gr, gh });
+        if (a > 0.02f)
         {
-            const float a = std::max (gl, gf);
-            g.setColour (look::accent.withAlpha (0.16f * a)); g.fillEllipse (px (k.x) - 6.f - 16.f * a, py (k.y) - 6.f - 16.f * a, 12.f + 32.f * a, 12.f + 32.f * a);
-            g.setColour (gl >= gf ? look::accent : look::accent.withAlpha (0.65f));
-            g.fillEllipse (px (k.x) - r - 2.f, py (k.y) - r - 2.f, (r + 2.f) * 2.f, (r + 2.f) * 2.f);
+            g.setColour (look::accent.withAlpha (0.16f * a)); g.fillEllipse (cx - 8.f - 16.f * a, cy - 8.f - 16.f * a, 16.f + 32.f * a, 16.f + 32.f * a);
+            g.setColour (gl >= std::max (gr, gh) ? look::accent : gr >= gh ? look::accent.withAlpha (0.7f) : look::accent.withAlpha (0.5f));
+            const float rr = gh > gl && gh > gr ? r * 0.7f : r + 2.f;
+            g.fillEllipse (cx - rr, cy - rr, rr * 2.f, rr * 2.f);
         }
+        if (rv > 0.05f) { g.setColour (look::accent.withAlpha (rv)); g.drawEllipse (cx - r - 5.f, cy - r - 5.f, (r + 5.f) * 2.f, (r + 5.f) * 2.f, 1.6f); }
         g.setColour (look::ink.withAlpha (0.35f + 0.55f * k.level));
-        g.fillEllipse (px (k.x) - r, py (k.y) - r, r * 2.f, r * 2.f);
+        g.fillEllipse (cx - r, cy - r, r * 2.f, r * 2.f);
     }
 
-    // the break, below, with its cuts
+    // the playhead
+    const float phase = proc.getLoopPhase();
+    g.setColour (look::accent.withAlpha (0.55f));
+    g.fillRect (px (phase) - 0.5f, m.getY(), 1.f, m.getHeight());
+
+    // the break itself, below, with its cuts and the playhead
     g.setColour (look::dim.withAlpha (0.7f));
     if (! view.peaks.empty())
     {
@@ -136,37 +123,49 @@ void BreakView::paint (juce::Graphics& g)
     for (size_t i = 0; i < view.marks.size(); ++i)
     {
         const auto& k = view.marks[i];
-        const float gl = i < glow.size() ? std::max (glow[i], glowFragment[i]) : 0.f;
-        if (gl > 0.05f)
-        {
-            g.setColour (look::accent.withAlpha (0.75f * gl));
-            g.fillRect (strip.getX() + k.x * strip.getWidth(), strip.getY(), std::max (2.f, k.w * strip.getWidth()), strip.getHeight());
-        }
-        g.setColour (look::ink.withAlpha (0.55f));
-        g.fillRect (strip.getX() + k.x * strip.getWidth() - 0.5f, strip.getBottom() - 6.f, 1.f, 6.f);
+        const float x = strip.getX() + (view.origin + k.x * (1.f - view.origin)) * strip.getWidth();
+        const float gl = std::max (glow[i], glowRoll[i]);
+        if (gl > 0.05f) { g.setColour (look::accent.withAlpha (0.7f * gl)); g.fillRect (x, strip.getY(), std::max (2.f, k.w * (1.f - view.origin) * strip.getWidth()), strip.getHeight()); }
+        g.setColour (look::ink.withAlpha (0.5f));
+        g.fillRect (x - 0.5f, strip.getBottom() - 6.f, 1.f, 6.f);
     }
     g.setColour (look::accent);
-    g.fillRect (strip.getX() + place * strip.getWidth() - 1.f, strip.getY() - 2.f, 2.f, strip.getHeight() + 4.f);
+    g.fillRect (strip.getX() + (view.origin + phase * (1.f - view.origin)) * strip.getWidth() - 1.f, strip.getY() - 2.f, 2.f, strip.getHeight() + 4.f);
 
     // words
     g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
-    static const char* oct[5] = { "C1", "C2", "C3", "C4", "C5" };
-    for (int i = 0; i < 5; ++i)
-        g.drawText (oct[i], juce::Rectangle<float> (m.getX() + 3.f, py ((float) i / 4.f) - (i == 0 ? 14.f : 12.f), 30.f, 12.f), juce::Justification::centredLeft, false);
-    g.drawText ("BRIGHT  -  HATS, RIMS, PINGS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topRight, false);
-    g.drawText ("DARK  -  KICKS, TOMS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::bottomRight, false);
+    g.drawText ("BRIGHT  -  HATS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topRight, false);
+    g.drawText ("DARK  -  KICKS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::bottomRight, false);
     const juce::String head = message.isNotEmpty() ? message
         : name.toUpperCase() + "   -   " + juce::String (view.marks.size()) + " HITS FOUND";
     g.setColour (message.isNotEmpty() ? look::accent : look::ink);
-    g.drawText (head, mapR.reduced (kInset + 2.f, 6.f).withTrimmedLeft (24.f), juce::Justification::topLeft, false);
+    g.drawText (head, mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topLeft, false);
 
     if (dropHover)
     {
         g.setColour (look::paper.withAlpha (0.82f)); g.fillRoundedRectangle (all, 6.f);
         g.setColour (look::accent); g.drawRoundedRectangle (all.reduced (1.f), 6.f, 2.f);
         g.setFont (look::caps (15.f, true, 0.3f));
-        g.drawText ("DROP A DRUM BREAK", getLocalBounds(), juce::Justification::centred, false);
+        g.drawText ("DROP A DRUM LOOP", getLocalBounds(), juce::Justification::centred, false);
+    }
+}
+
+//==============================================================================
+void PadButton::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (2.f);
+    const bool on = lit || down;
+    if (on) { g.setColour (look::accent); g.fillRoundedRectangle (r, 6.f); }
+    else    { g.setColour (hover ? look::paper2 : look::paper); g.fillRoundedRectangle (r, 6.f); g.setColour (hover ? look::ink : look::rule); g.drawRoundedRectangle (r.reduced (0.5f), 6.f, 1.2f); }
+    g.setColour (on ? look::paper : look::ink);
+    g.setFont (look::caps (small ? 9.5f : 10.5f, true, 0.1f));
+    g.drawText (label.toUpperCase(), r.reduced (2.f, 0.f).withTrimmedBottom (small ? 0.f : 12.f), juce::Justification::centred, false);
+    if (! small)
+    {
+        g.setColour (on ? look::paper.withAlpha (0.8f) : look::dim);
+        g.setFont (look::caps (8.5f, false, 0.08f));
+        g.drawText (subLabel, r.removeFromBottom (14.f), juce::Justification::centred, false);
     }
 }
 
@@ -174,7 +173,7 @@ void BreakView::paint (juce::Graphics& g)
 PoomseShardsEditor::Knob& PoomseShardsEditor::makeKnob (const juce::String& paramId, const juce::String& text)
 {
     auto* k = knobs.add (new Knob());
-    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, 18);
+    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 86, 18);
     k->slider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
     k->name.setText (text.toUpperCase(), juce::dontSendNotification);
     k->name.setJustificationType (juce::Justification::centred);
@@ -192,8 +191,16 @@ PoomseShardsEditor::PoomseShardsEditor (PoomseShardsProcessor& p) : AudioProcess
     setLookAndFeel (&laf);
     addAndMakeVisible (breakView);
 
-    makeKnob ("place", "Place"); makeKnob ("shatter", "Shatter"); makeKnob ("grid", "Grid"); makeKnob ("ramp", "Ramp");
-    makeKnob ("scatter", "Scatter"); makeKnob ("fall", "Fall"); makeKnob ("snap", "Snap"); makeKnob ("tune", "Tune"); makeKnob ("level", "Level");
+    // 7 kinds of damage, then 6 settings of the loop
+    makeKnob ("mutate", "Mutate"); makeKnob ("shuffle", "Shuffle"); makeKnob ("reverse", "Reverse"); makeKnob ("ramp", "Ramp");
+    makeKnob ("pitch", "Pitch"); makeKnob ("ghosts", "Ghosts"); makeKnob ("holes", "Holes");
+    makeKnob ("groove", "Groove"); makeKnob ("gate", "Gate"); makeKnob ("tune", "Tune"); makeKnob ("quant", "Start on");
+    makeKnob ("bars", "Loop length"); makeKnob ("level", "Level");
+
+    for (int i = 0; i < sh::numFills; ++i)
+        addAndMakeVisible (fillPads.add (new PadButton (proc, sh::kFillBase + i, sh::kFillNames[i], juce::String (kNoteNames[i]) + "1", true)));
+    for (int i = 0; i < sh::numFlavors; ++i)
+        addAndMakeVisible (keyPads.add (new PadButton (proc, 60 + i, sh::kFlavorNames[i], juce::String (kNoteNames[i]) + "3", false)));
 
     randomButton.setComponentID ("ink");
     randomButton.onClick = [this] { proc.randomise(); };
@@ -222,9 +229,17 @@ PoomseShardsEditor::PoomseShardsEditor (PoomseShardsProcessor& p) : AudioProcess
         addAndMakeVisible (c);
 
     setSize (kWidth, kHeight);
+    startTimerHz (20);
 }
 
-PoomseShardsEditor::~PoomseShardsEditor() { setLookAndFeel (nullptr); }
+PoomseShardsEditor::~PoomseShardsEditor() { stopTimer(); setLookAndFeel (nullptr); }
+
+void PoomseShardsEditor::timerCallback()
+{
+    const int mask = proc.getActiveFlavours();
+    for (int i = 0; i < keyPads.size(); ++i)  keyPads[i]->setLit ((mask & (1 << i)) != 0);
+    for (int i = 0; i < fillPads.size(); ++i) fillPads[i]->setLit ((mask & (0x10000 << i)) != 0);
+}
 
 void PoomseShardsEditor::disarmReset() { resetArmed = false; resetButton.setButtonText ("Reset"); }
 
@@ -245,10 +260,16 @@ void PoomseShardsEditor::paint (juce::Graphics& g)
     g.setColour (look::accent);
     g.drawText ("SHARDS", kPad + w1 - 4, 16, 160, 30, juce::Justification::centredLeft, false);
 
+    g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
+    g.drawText ("FILLS  -  C1 TO B1", kPad, 358, 300, 12, juce::Justification::centredLeft, false);
+    g.drawText ("KEYS  -  A DIFFERENT LOOP FOR EACH (C3 TO B3)", kPad, 412, 400, 12, juce::Justification::centredLeft, false);
+    g.drawText ("WHAT GETS DAMAGED", kPad, 470, 300, 12, juce::Justification::centredLeft, false);
+    g.drawText ("THE LOOP", kPad, 582, 300, 12, juce::Justification::centredLeft, false);
+
     g.setFont (juce::Font (juce::FontOptions (11.f)));
-    g.drawText ("Low keys play dark hits, high keys bright ones (C1 to C5). Place chooses where in the break they come from. Shatter breaks a hit into a burst, in time.",
-                kPad, getHeight() - 30, getWidth() - 2 * kPad, 16, juce::Justification::centredLeft, false);
+    g.drawText ("Hold a key: it plays the loop, taken apart differently each bar, always on the grid. Mutate = how far. Hold several keys for several loops.",
+                kPad, getHeight() - 28, getWidth() - 2 * kPad, 16, juce::Justification::centredLeft, false);
 }
 
 void PoomseShardsEditor::resized()
@@ -260,12 +281,22 @@ void PoomseShardsEditor::resized()
     presetBox.setBounds (kPad + 32, 62, 250, 28);
     nextPreset.setBounds (kPad + 288, 62, 26, 28);
 
-    breakView.setBounds (kPad, 104, getWidth() - 2 * kPad, 340);
-    const int cw = (getWidth() - 2 * kPad) / knobs.size();
-    for (int i = 0; i < knobs.size(); ++i)
+    const int contentW = getWidth() - 2 * kPad;
+    breakView.setBounds (kPad, 100, contentW, 250);
+    const int pw = contentW / 12;
+    for (int i = 0; i < fillPads.size(); ++i) fillPads[i]->setBounds (kPad + i * pw, 370, pw, 34);
+    for (int i = 0; i < keyPads.size(); ++i)  keyPads[i]->setBounds (kPad + i * pw, 426, pw, 42);
+
+    auto place = [&] (int from, int count, int y)
     {
-        juce::Rectangle<int> cell (kPad + i * cw, 462, cw, 124);
-        knobs[i]->name.setBounds (cell.removeFromTop (16));
-        knobs[i]->slider.setBounds (cell);
-    }
+        const int cw = contentW / count;
+        for (int i = 0; i < count; ++i)
+        {
+            juce::Rectangle<int> cell (kPad + i * cw, y, cw, 96);
+            knobs[from + i]->name.setBounds (cell.removeFromTop (14));
+            knobs[from + i]->slider.setBounds (cell);
+        }
+    };
+    place (0, 7, 482);
+    place (7, 6, 596);
 }
