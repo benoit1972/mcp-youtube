@@ -391,6 +391,25 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
     randomButton.setComponentID ("pillAccent");
     addAndMakeVisible (randomButton);
 
+    // Reset needs a second click within 3 s, so a stray click never wipes a sound in progress
+    resetButton.setComponentID ("pill");
+    addAndMakeVisible (resetButton);
+    resetButton.onClick = [this]
+    {
+        if (! resetArmed)
+        {
+            resetArmed = true;
+            resetButton.setButtonText ("Sure?");
+            juce::Timer::callAfterDelay (3000, [safe = juce::Component::SafePointer<PoomseGlitchEditor> (this)]
+                                         { if (safe != nullptr) safe->disarmReset(); });
+        }
+        else
+        {
+            proc.resetToDefaults();
+            disarmReset();
+        }
+    };
+
     // Random acts on the page you are on (sculpt one section at a time); on Mod/Matrix it gives the 8 macros
     // random targets and random values. Shift + click = all sound sections.
     randomButton.onClick = [this]
@@ -406,6 +425,12 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
 }
 
 PoomseGlitchEditor::~PoomseGlitchEditor() { setLookAndFeel (nullptr); }
+
+void PoomseGlitchEditor::disarmReset()
+{
+    resetArmed = false;
+    resetButton.setButtonText ("Reset");
+}
 
 void PoomseGlitchEditor::showPage (int index)
 {
@@ -469,6 +494,7 @@ void PoomseGlitchEditor::paint (juce::Graphics& g)
 void PoomseGlitchEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
+    resetButton.setBounds (randomButton.getX() - 10 - 90, 18, 90, 30);
     for (int i = 0; i < 5; ++i)
         tabButtons[i].setBounds (kPad + i * 88, 66, 80, 30);
 

@@ -48,6 +48,10 @@ public:
     enum class RandomScope { Grain, Play, Fx, Mod, AllSound };
     void randomise (RandomScope scope);
 
+    // Message thread: every parameter back to its neutral default and the matrix back to the default macro
+    // assignments (LFO / sequencer columns cleared). The loaded sample is kept.
+    void resetToDefaults();
+
     // Modulation matrix (source x destination amount, -1..1). Thread-safe, edited from the UI.
     float getMatrix (int src, int dest) const { return matrix[(size_t) (src * gg::kNumDests + dest)].load(); }
     void setMatrix (int src, int dest, float v)

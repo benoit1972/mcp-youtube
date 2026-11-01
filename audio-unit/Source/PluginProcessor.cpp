@@ -439,6 +439,22 @@ void GlitchGrainProcessor::randomise (RandomScope scope)
     }
 }
 
+void GlitchGrainProcessor::resetToDefaults()
+{
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+        {
+            rp->beginChangeGesture();
+            rp->setValueNotifyingHost (rp->getDefaultValue());
+            rp->endChangeGesture();
+        }
+
+    const auto dm = gg::defaultMatrix();
+    for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
+        for (int d = 0; d < gg::kNumDests; ++d)
+            setMatrix (sIdx, d, dm.amt[sIdx][d]);
+}
+
 juce::AudioProcessorEditor* GlitchGrainProcessor::createEditor() { return new PoomseGlitchEditor (*this); }
 
 void GlitchGrainProcessor::getStateInformation (juce::MemoryBlock& dest)

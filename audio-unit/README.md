@@ -13,7 +13,9 @@ Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d
 
 Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. Les macros ont des affectations par défaut (texture, nuage, hauteur, espace, écho, grain, enveloppe, mouvement) que tu peux changer dans la Matrix. Les modulations sont calculées une fois par bloc audio.
 
-Bouton **Random** : agit sur la **page affichée** : Grain, Play ou FX = ces réglages ; Mod ou Matrix = donne aux 8 macros **des cibles aléatoires** dans la matrice (2 à 4 paramètres chacune) **et des valeurs aléatoires** (les colonnes LFO et séquenceur sont conservées) ; **Maj + clic** = Grain + Play + FX. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés dans des plages musicales.
+Bouton **Reset** (en haut à droite, à gauche de Random) : remet **tous** les réglages à leur valeur neutre (effets, stutter, glitch, Drift, LFO, séquenceur et macros à zéro, matrice aux affectations par défaut des macros) pour repartir d'un son vierge. Il demande un second clic dans les 3 secondes (« Sure? »). L'échantillon chargé est conservé.
+
+Bouton **Random** : agit sur la **page affichée** : Grain, Play ou FX = ces réglages ; Mod ou Matrix = donne aux 8 macros **des cibles aléatoires** dans la matrice (2 à 4 paramètres chacune) **et des valeurs aléatoires** (les colonnes LFO et séquenceur sont conservées) ; **Maj + clic** = Grain + Play + FX. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés.
 **Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement

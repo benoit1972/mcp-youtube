@@ -102,6 +102,7 @@ private:
     void addRow (int page, const char* title, Cell cell, int cols,
                  std::initializer_list<std::pair<const char*, const char*>> params);
     void showPage (int index);
+    void disarmReset();
 
     PoomseLookAndFeel laf;
     GlitchGrainProcessor& proc;
@@ -113,7 +114,8 @@ private:
     EuclidView euclid;
     ModMatrixView matrixView;
     juce::TextButton tabButtons[5];
-    juce::TextButton randomButton { "Random" };
+    juce::TextButton randomButton { "Random" }, resetButton { "Reset" };
+    bool resetArmed = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseGlitchEditor)
 };
