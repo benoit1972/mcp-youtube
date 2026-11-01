@@ -53,15 +53,19 @@ jobs:
       - name: Publish the zip into the repository (poomse-shards/release)
         working-directory: ${{ github.workspace }}
         run: |
-          git rm -rq --ignore-unmatch poomse-shards/release
-          mkdir -p poomse-shards/release
-          cp poomse-shards/dist/PoomseShards-AU-macOS.zip poomse-shards/dist/INSTALL.txt poomse-shards/release/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add poomse-shards/release
-          git commit -m "Publish built Poomse Shards zip" || exit 0
-          for i in 1 2 3 4; do
-            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+          mkdir -p /tmp/pub && cp poomse-shards/dist/PoomseShards-AU-macOS.zip poomse-shards/dist/INSTALL.txt /tmp/pub/
+          for i in 1 2 3 4 5; do
+            # start again from the latest state of the branch each time: a zip is binary, there is nothing to merge
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            git rm -rq --ignore-unmatch poomse-shards/release
+            mkdir -p poomse-shards/release
+            cp /tmp/pub/PoomseShards-AU-macOS.zip /tmp/pub/INSTALL.txt poomse-shards/release/
+            git add poomse-shards/release
+            git commit -m "Publish built Poomse Shards zip" || exit 0
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
             sleep $((i * 5))
           done
 
