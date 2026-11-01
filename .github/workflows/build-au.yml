@@ -3,8 +3,11 @@ name: Build Glitch Grain (Audio Unit)
 on:
   push:
     branches: [claude/plugin-format-au-s4g5da]
-    paths: ['audio-unit/**', '.github/workflows/build-au.yml']
+    paths: ['audio-unit/**', '!audio-unit/release/**', '.github/workflows/build-au.yml']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -46,6 +49,18 @@ jobs:
              xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/Glitch Grain.component"
           4. Relancez Logic Pro / GarageBand (instrument : Audio Units > Benoit > Glitch Grain).
           TXT
+
+      - name: Publish the zip into the repository (audio-unit/release)
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p audio-unit/release
+          cp audio-unit/dist/GlitchGrain-AU-macOS.zip audio-unit/dist/INSTALL.txt audio-unit/release/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audio-unit/release
+          git commit -m "Publish built Audio Unit zip" || exit 0
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - uses: actions/upload-artifact@v4
         with:
