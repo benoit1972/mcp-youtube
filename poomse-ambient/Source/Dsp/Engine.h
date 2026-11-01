@@ -304,8 +304,8 @@ private:
         if (v == nullptr) { for (auto& x : voices) if (x.releasing) { v = &x; break; } }   // steal one that is already fading
         if (v == nullptr) return;
 
-        static const float attackSec[kNumLayers]  = { 0.004f, 0.02f, 4.0f, 0.001f, 4.0f, 0.05f };
-        static const float releaseSec[kNumLayers] = { 1.6f, 2.5f, 6.0f, 0.35f, 6.0f, 1.2f };
+        static const float attackSec[kNumLayers]  = { 0.004f, 0.02f, 6.0f, 0.001f, 4.0f, 0.05f };
+        static const float releaseSec[kNumLayers] = { 1.6f, 2.5f, 8.0f, 0.35f, 6.0f, 1.2f };
         static const bool loops[kNumLayers]       = { false, false, true, false, true, true };
 
         *v = Voice{};
@@ -344,7 +344,9 @@ private:
             if (! v.active) continue;
             const auto& src = *v.src;
             const int len = src.size();
-            const int fade = std::min (len / 4, (int) (0.03 * src.sampleRate));
+            // a held sound loops with a long crossfade (up to 2 s, at most half the sample): whatever the sample is
+            // (a piano note, a short hit), it becomes a smooth drone instead of a short note that repeats
+            const int fade = v.loop ? std::min (len / 2, (int) (2.0 * src.sampleRate)) : std::min (len / 4, (int) (0.03 * src.sampleRate));
             const int loopEnd = len - fade;
             for (int i = 0; i < n; ++i)
             {

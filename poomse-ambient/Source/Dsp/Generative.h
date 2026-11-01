@@ -161,8 +161,8 @@ inline constexpr VoiceDef kVoices[] = {
     { Keys, 0, 0,  7.3f, 0.9f }, { Keys, 2, 0,  9.1f, 0.8f }, { Keys, 4, 0, 11.7f, 0.8f }, { Keys, 1, 1, 14.3f, 0.6f }, { Keys, 3, 0, 18.9f, 0.7f },
     // vocals: three long, soft notes
     { Vocals, 0, 1, 17.9f, 0.8f }, { Vocals, 4, 0, 23.3f, 0.7f }, { Vocals, 2, 1, 29.7f, 0.6f },
-    // pad: root, fifth and third, each very long: they overlap into a chord that is never twice the same
-    { Pad, 0, 0, 24.7f, 0.9f }, { Pad, 4, 0, 31.9f, 0.8f }, { Pad, 2, 0, 38.3f, 0.7f },
+    // chords: ONE slow voice. Each event is a whole chord held for 40-70 beats; a new one only every ~60 beats.
+    { Pad, 0, 0, 61.7f, 0.9f },
     // bells (the beat slot in the Clean style)
     { Beat, 0, 2, 11.1f, 0.8f }, { Beat, 4, 1, 13.7f, 0.7f }, { Beat, 2, 2, 19.1f, 0.7f }, { Beat, 1, 2, 22.3f, 0.5f },
     // sub: the root, and now and then the fifth
@@ -343,7 +343,7 @@ private:
         else if (r < 0.55f)       // the floor drops: a deep sub note under the root
         {
             ev (Sub, noteFor (Sub, 0, -1, g), 0.85f, t + 0.5, 12.f);
-            ev (Pad, noteFor (Pad, 0, 0, g), 0.7f, t + 0.5, 28.f);
+            ev (Pad, noteFor (Pad, 0, 0, g), 0.7f, t + 0.5, 40.f);
         }
         else if (r < 0.80f && g.night)   // a short broken fill of the beat, slipping off the grid
         {
@@ -387,6 +387,19 @@ private:
             if (rng.uni() >= w) return;
             e.note = lp.root + semis; e.velocity = std::clamp (vl * (0.8f + 0.4f * rng.uni()) * gain, 0.05f, 1.f);
             e.beat = t + ((step % 2) ? 0.06 + 0.04 * rng.uni() : 0.015 * rng.bi()); e.durBeats = 0.3f;
+        }
+        else if (l == Pad)     // a held chord: three notes of the set started together, very long, never short repeats
+        {
+            static const int chords[3][3] = { { 0, 2, 3 }, { 0, 3, 4 }, { 1, 3, 4 } };   // no two notes a semitone apart
+            const int* c = chords[(int) (rng.uni() * 3.f) % 3];
+            const float dur = 40.f + 30.f * rng.uni();
+            const float vl = vel (0.5f, 0.85f);
+            for (int k = 0; k < 3; ++k)
+            {
+                Event n = e; n.note = noteFor (Pad, c[k], 0, g); n.velocity = vl; n.durBeats = dur + 2.f * (float) k; n.pan = pan();
+                push (out, count, maxOut, n);
+            }
+            return;
         }
         else
         {

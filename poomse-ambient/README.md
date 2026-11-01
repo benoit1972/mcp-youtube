@@ -19,16 +19,16 @@ jamais de notes tirées au hasard à chaque fois.
   petit roulement, note aiguë isolée.
 - Mesuré dans les tests : dans les 8 gammes et les 2 styles, **aucune paire de notes qui sonnent ensemble ne forme un demi-ton ou une septième majeure**.
 
-## Les six couches (un sample chacune : glisse-le sur la zone)
+## Les six emplacements (nommés d'après leur comportement : n'importe quel son dans n'importe quel emplacement)
 
-| Couche | Rôle |
+| Emplacement | Comment il joue |
 |---|---|
-| Keys | notes de clavier éparses |
-| Vocals | voix fantômes hachées et transposées |
-| Pad | nappes sombres (accords) |
-| Beat | un coup de batterie joué en rythme cassé et rare (Night) ; des cloches éparses (Clean) |
-| Atmos | pluie, ville, craquements : presque continu |
-| Sub | notes graves lentes sur la tonique / l'accord |
+| Notes | notes courtes et éparses |
+| Phrases | notes longues et douces, très espacées |
+| Chords | **accords tenus** de 3 notes (40 à 70 temps), un nouvel accord toutes les ~minute ; le son est bouclé avec un fondu de 2 s : même un son court devient un drone continu |
+| Pulse | un coup joué en rythme cassé et rare (Night) ; des cloches éparses (Clean) |
+| Texture | fond presque continu (pluie, ville, craquements, champ) |
+| Low | notes graves lentes sur la tonique / l'accord |
 
 Des sons intégrés jouent dès l'ouverture. Pour chaque couche : *Level*, *Amount* (à quelle fréquence elle joue), *Space* (envoi réverb).
 La hauteur d'un sample déposé est **détectée automatiquement** ; boutons +/- pour la corriger.

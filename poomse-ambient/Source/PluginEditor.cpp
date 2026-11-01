@@ -7,7 +7,12 @@ constexpr int kFormHeight = 150, kTitleHeight = 20, kRowGap = 10, kNameHeight = 
 int cellHeight (int cell) { return cell == 0 ? 128 : cell == 1 ? 104 : 96; }
 juce::Colour moodColour (int mood) { return mood == amb::Light ? look::moodLight : mood == amb::Deep ? look::moodDeep : look::moodStill; }
 const char* moodName (int mood) { return mood == amb::Light ? "LIGHT" : mood == amb::Deep ? "DEEP" : "STILL"; }
-juce::String layerLabel (int slot, bool night) { return slot == amb::Beat && ! night ? juce::String ("Bells") : juce::String (amb::kLayerNames[slot]); }
+// The slots are named after how they PLAY, not after a sound: any sample can go in any slot.
+juce::String layerLabel (int slot, bool night)
+{
+    static const char* roles[amb::kNumLayers] = { "Notes", "Phrases", "Chords", "Pulse", "Texture", "Low" };
+    return slot == amb::Beat && ! night ? juce::String ("Bells") : juce::String (roles[slot]);
+}
 }
 
 //==============================================================================
@@ -357,7 +362,7 @@ void PoomseAmbientEditor::paint (juce::Graphics& g)
     if (currentPage == 1)
     {
         g.setFont (juce::Font (juce::FontOptions (11.f)));
-        g.drawText ("Drop a sample on each layer.  Amount = how often it plays.  Space = how much goes into the reverb.  +/- = the note the sample is in.",
+        g.drawText ("Any sound in any slot.  NOTES short, sparse   PHRASES long soft notes   CHORDS held chords, very slow   PULSE rhythm / bells   TEXTURE continuous   LOW slow bass.   +/- = the note of the sample.",
                     kPad, getHeight() - 26, getWidth() - 2 * kPad, 16, juce::Justification::centredLeft, false);
         return;
     }

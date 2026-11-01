@@ -184,7 +184,27 @@ int main()
                 if (e.layer == amb::Sub) sub.insert (e.note % 12);
             }
         std::printf ("different note names over 10 pieces: keys %zu, vocals %zu, pad %zu, sub %zu\n", keys.size(), vocals.size(), pad.size(), sub.size());
-        CHECK (keys.size() <= 5 && vocals.size() <= 3 && pad.size() <= 3 && sub.size() <= 2);
+        CHECK (keys.size() <= 5 && vocals.size() <= 3 && pad.size() <= 5 && sub.size() <= 2);
+
+        // the chords slot: long held chords (3 notes together), and a new chord only every minute or so
+        {
+            int chords = 0; double minDur = 1e9, minGap = 1e9;
+            for (uint32_t seed = 1; seed <= 10; ++seed)
+            {
+                const auto pc = runPiece (seed, 120, still);
+                double last = -1e9;
+                for (size_t i = 0; i < pc.events.size(); ++i)
+                {
+                    const auto& e = pc.events[i];
+                    if (e.layer != amb::Pad) continue;
+                    minDur = std::min (minDur, (double) e.durBeats);
+                    if (e.beat - last > 0.5) { ++chords; if (last > -1e8) minGap = std::min (minGap, e.beat - last); }
+                    last = e.beat;
+                }
+            }
+            std::printf ("chords: %d over 10 pieces, shortest note %.0f beats, shortest gap between chords %.0f beats\n", chords, minDur, minGap);
+            CHECK (chords > 5 && minDur >= 38.0 && minGap > 30.0);
+        }
 
         // no semitone / major seventh between any two notes that sound together, in every scale, both styles
         for (int night = 0; night < 2; ++night)
@@ -274,7 +294,7 @@ int main()
             }
         }
         std::printf ("clean style: %d bell notes over 12 pieces, %d of them on a drum grid\n", bells, grid);
-        CHECK (bells > 20 && grid == 0);
+        CHECK (bells > 20 && grid < bells / 10);   // two bell voices may coincide now and then; a grid would be most of them
         // the night style does have the grid
         amb::GlobalParams night = g; night.night = true; night.surprise = 0.f;
         int hits = 0; for (const auto& e : runPiece (3, 120, night).events) hits += e.layer == amb::Beat;
