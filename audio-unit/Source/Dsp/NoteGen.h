@@ -15,7 +15,8 @@ struct GenParams
 {
     float probability = 0.f; // 0 = off; chance that a step plays a note
     int rateDiv = 2;         // 0:1 bar 1:1/2 2:1/4 3:1/8 4:1/16
-    int scale = 2;           // see scaleIntervals()
+    int scale = 2;           // 0..5 see scaleIntervals(); 6 = "From MIDI" (use scaleMask)
+    unsigned scaleMask = 0;  // bit n set = pitch class n (0=C) is allowed; used when scale == 6
     int root = 0;            // 0..11 (C..B)
     float length = 1.5f;     // note length in steps
     double bpm = 120.0;
@@ -79,7 +80,19 @@ public:
 
         const double stepLen = std::max (64.0, 60.0 / std::max (20.0, p.bpm) * sr * genStepBeats (p.rateDiv));
         const int* iv = nullptr;
-        const int nDeg = scaleIntervals (p.scale, iv);
+        int midiPcs[12];
+        int nDeg = 0;
+        int root = p.root;
+        if (p.scale == 6 && p.scaleMask != 0)
+        {
+            // "From MIDI": the scale is whatever pitch classes were recently played; notes are absolute
+            for (int pc = 0; pc < 12; ++pc)
+                if (p.scaleMask & (1u << pc)) midiPcs[nDeg++] = pc;
+            iv = midiPcs;
+            root = 0;
+        }
+        else
+            nDeg = scaleIntervals (p.scale == 6 ? 2 : p.scale, iv); // nothing played yet: pentatonic fallback
         const int span = nDeg * 3; // three octaves
 
         while (untilStep < (double) numSamples)
@@ -91,7 +104,7 @@ public:
                 const int step = r < 0.35f ? 1 : r < 0.7f ? -1 : r < 0.82f ? 2 : r < 0.94f ? -2 : (int) (rng.bi() * 4.f);
                 walk = std::clamp (walk + step, 0, span - 1);
                 if (walk == 0 || walk == span - 1) walk = std::clamp (walk + (walk == 0 ? 2 : -2), 0, span - 1);
-                const int note = 48 + p.root + (walk / nDeg) * 12 + iv[walk % nDeg];
+                const int note = 48 + root + (walk / nDeg) * 12 + iv[walk % nDeg];
                 const float vel = 0.4f + 0.5f * rng.uni();
                 const int off = (int) untilStep;
                 push (off, note, vel, true);

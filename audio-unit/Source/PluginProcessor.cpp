@@ -64,7 +64,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<F> (pid ("delayTime"),  "Delay Time",     Range (10.f, 1500.f, 1.f, 0.5f), 380.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (juce::roundToInt (x)) + " ms"; })));
-    l.add (std::make_unique<F> (pid ("delayFb"),    "Delay Feedback", Range (0.f, 0.95f, 0.001f), 0.4f,
+    l.add (std::make_unique<F> (pid ("delayFb"),    "Delay Feedback", Range (0.f, 0.85f, 0.001f), 0.4f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<F> (pid ("delayMix"),   "Delay Mix",      Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
@@ -81,7 +81,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
     l.add (std::make_unique<F> (pid ("drift"),      "Drift",          Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<C> (pid ("driftRate"),  "Drift Rate",     juce::StringArray { "1 bar", "1/2", "1/4", "1/8", "1/16" }, 1));
-    l.add (std::make_unique<C> (pid ("driftScale"), "Drift Scale",    juce::StringArray { "Major", "Minor", "Pentatonic", "Dorian", "Lydian", "Whole tone" }, 2));
+    l.add (std::make_unique<C> (pid ("driftScale"), "Drift Scale",    juce::StringArray { "Major", "Minor", "Pentatonic", "Dorian", "Lydian", "Whole tone", "From MIDI" }, 2));
     l.add (std::make_unique<C> (pid ("driftRoot"),  "Drift Root",     juce::StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
     l.add (std::make_unique<F> (pid ("driftLength"), "Drift Length",  Range (0.25f, 6.f, 0.01f, 0.5f), 1.5f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (x, 2) + " steps"; })));
@@ -103,6 +103,8 @@ void GlitchGrainProcessor::prepareToPlay (double sampleRate, int)
     fx.prepare (sampleRate);
     ambient.prepare (sampleRate);
     noteGen.prepare (sampleRate);
+    lastHeard.fill (-1000000000000LL);
+    sampleClock = 0;
     level.reset (sampleRate, 0.03);
     level.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (param ("level")));
 }
@@ -195,10 +197,21 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         const auto m = meta.getMessage();
         const int off = std::min (meta.samplePosition, n - 1);
-        if (m.isNoteOn())                                addEv ({ off, 0, m.getNoteNumber(), m.getFloatVelocity() });
+        if (m.isNoteOn())
+        {
+            addEv ({ off, 0, m.getNoteNumber(), m.getFloatVelocity() });
+            lastHeard[(size_t) (m.getNoteNumber() % 12)] = sampleClock + off; // Drift "From MIDI" scale
+        }
         else if (m.isNoteOff())                          addEv ({ off, 1, m.getNoteNumber(), 0.f });
         else if (m.isAllNotesOff() || m.isAllSoundOff()) addEv ({ off, 2, 0, 0.f });
     }
+    // "From MIDI": the scale is every pitch class played on the keyboard during the last 20 s
+    dp.scaleMask = 0;
+    for (int pc = 0; pc < 12; ++pc)
+        if (sampleClock - lastHeard[(size_t) pc] < (juce::int64) (20.0 * currentSampleRate))
+            dp.scaleMask |= 1u << pc;
+    sampleClock += n;
+
     gg::NoteEvent gen[64];
     const int numGen = noteGen.generate (n, dp, gen, 64);
     for (int i = 0; i < numGen; ++i)
@@ -225,6 +238,7 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         else                  engine.allNotesOff();
     }
     render (n);
+    fp.active = engine.anyHeld(); // stutter/glitch only while a key is held
 
     level.setTargetValue (juce::Decibels::decibelsToGain (param ("level")));
     for (int i = 0; i < n; ++i)
@@ -281,18 +295,19 @@ void GlitchGrainProcessor::randomise()
     static const R ranges[] = {
         { "size", 0.10f, 0.85f },   { "density", 0.20f, 0.90f },  { "pitch", 0.25f, 0.75f },
         { "pitchSpray", 0.f, 0.5f }, { "reverse", 0.f, 0.7f },
-        { "attack", 0.f, 0.55f },   { "decay", 0.10f, 0.80f },    { "sustain", 0.35f, 1.f },
-        { "release", 0.10f, 0.80f },
-        { "stutter", 0.f, 0.6f },   { "stutterPitch", 0.25f, 0.75f }, { "glitch", 0.f, 0.5f },
-        { "tape", 0.f, 0.8f },      { "delayFb", 0.f, 0.75f },    { "delayMix", 0.f, 0.6f },
-        { "reverbSize", 0.2f, 1.f }, { "reverbMix", 0.05f, 0.6f }, { "shimmer", 0.f, 0.7f },
+        { "attack", 0.f, 0.45f },   { "decay", 0.10f, 0.70f },    { "sustain", 0.40f, 1.f },
+        { "release", 0.10f, 0.50f },
+        { "stutter", 0.f, 0.5f },   { "stutterPitch", 0.25f, 0.75f }, { "glitch", 0.f, 0.4f },
+        { "tape", 0.f, 0.7f },      { "delayFb", 0.f, 0.6f },     { "delayMix", 0.f, 0.45f },
+        { "reverbSize", 0.2f, 0.8f }, { "reverbMix", 0.05f, 0.45f }, { "shimmer", 0.f, 0.5f },
     };
 
     juce::Random rng;
     for (auto* p : getParameters())
     {
         auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
-        if (rp == nullptr || rp->paramID == "level") continue; // never touch the master volume
+        // never touch the master volume, nor the Drift note generator (it would start playing by itself)
+        if (rp == nullptr || rp->paramID == "level" || rp->paramID.startsWith ("drift")) continue;
 
         float lo = 0.f, hi = 1.f;
         for (const auto& r : ranges)

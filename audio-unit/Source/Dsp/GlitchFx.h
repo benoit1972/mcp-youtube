@@ -15,6 +15,7 @@ struct FxParams
     float glitchAmount = 0.f;  // 0..1 probability that a glitch slot fires
     int glitchDiv = 2;         // glitch slot length: see divisionBeats()
     double bpm = 120.0;
+    bool active = true;        // false (no key held): stutter and glitch stop at once, nothing keeps repeating
 };
 
 // 0:1/4 1:1/8 2:1/16 3:1/32 4:1/8T 5:1/16T 6:1/32T, expressed in beats (quarter notes)
@@ -60,7 +61,7 @@ public:
         if (beatCounter >= beatLen)
         {
             beatCounter -= beatLen;
-            if (rng.uni() < p.stutterAmount)
+            if (p.active && rng.uni() < p.stutterAmount)
             {
                 const int loopLen = std::clamp ((int) (beatLen * divisionBeats (p.stutterDiv)), 32, ringSize / 2);
                 const int start = wrap (writeIdx - loopLen + 1);
@@ -77,6 +78,7 @@ public:
             else
                 stutterOn = false;
         }
+        if (! p.active) stutterOn = false;
         stutterMix += ((stutterOn ? 1.f : 0.f) - stutterMix) * smooth;
 
         float ol = l, orr = r;
@@ -102,6 +104,7 @@ public:
             glitchCounter -= glitchLen;
             startGlitch (p);
         }
+        if (! p.active) glitchOn = false;
         glitchMix += ((glitchOn ? 1.f : 0.f) - glitchMix) * smooth;
 
         float outL = ol, outR = orr;
@@ -150,7 +153,7 @@ private:
 
     void startGlitch (const FxParams& p)
     {
-        glitchOn = rng.uni() < p.glitchAmount;
+        glitchOn = p.active && rng.uni() < p.glitchAmount;
         if (! glitchOn) return;
         glitchType = (int) (rng.nextU32() % 4u);
         switch (glitchType)

@@ -20,7 +20,7 @@ public:
         size = (int) (0.05 * sr) + 8;
         bufL.assign ((size_t) size, 0.f);
         bufR.assign ((size_t) size, 0.f);
-        w = 0; wowPh = flutPh = 0.f; drift = 0.f; lpL = lpR = 0.f;
+        w = 0; wowPh = flutPh = 0.f; drift = 0.f; lpL = lpR = 0.f; follow = 0.f;
         rng = Rng (seed);
     }
 
@@ -48,8 +48,12 @@ public:
 
             const float drive = 1.f + 2.f * amount;
             const float mk = 1.f / std::sqrt (drive);
-            xl = std::tanh (xl * drive) * mk + rng.bi() * 0.0008f * amount;
-            xr = std::tanh (xr * drive) * mk + rng.bi() * 0.0008f * amount;
+            // hiss only follows the signal: pure silence in = pure silence out
+            const float lvl = std::max (std::abs (l), std::abs (r));
+            follow += (lvl - follow) * (lvl > follow ? 0.02f : 0.0005f);
+            const float hiss = 0.0008f * amount * std::min (1.f, follow * 50.f);
+            xl = std::tanh (xl * drive) * mk + rng.bi() * hiss;
+            xr = std::tanh (xr * drive) * mk + rng.bi() * hiss;
 
             const float fc = 18000.f - 13000.f * amount;
             const float a = std::exp (-2.f * kPi * fc / (float) sr);
@@ -64,7 +68,7 @@ private:
     double sr = 48000.0;
     int size = 1, w = 0;
     std::vector<float> bufL, bufR;
-    float wowPh = 0.f, flutPh = 0.f, drift = 0.f, lpL = 0.f, lpR = 0.f;
+    float wowPh = 0.f, flutPh = 0.f, drift = 0.f, lpL = 0.f, lpR = 0.f, follow = 0.f;
     Rng rng;
 };
 
@@ -97,7 +101,7 @@ public:
         lpL += k * (dl - lpL);
         lpR += k * (dr - lpR);
 
-        const float fb = std::clamp (feedback, 0.f, 0.95f);
+        const float fb = std::clamp (feedback, 0.f, 0.85f);
         bufL[(size_t) w] = (l + r) * 0.5f + lpR * fb; // L feeds R feeds L: ping-pong
         bufR[(size_t) w] = lpL * fb;
         w = w + 1 >= size ? 0 : w + 1;
@@ -134,7 +138,7 @@ public:
 
     void setParams (float size, float damp)
     {
-        feedback = 0.7f + 0.28f * std::clamp (size, 0.f, 1.f);
+        feedback = 0.7f + 0.24f * std::clamp (size, 0.f, 1.f); // max 0.94: tails of a few seconds, not endless
         const float d = 0.4f * std::clamp (damp, 0.f, 1.f);
         for (auto& ch : combs) for (auto& c : ch) { c.feedback = feedback; c.damp1 = d; c.damp2 = 1.f - d; }
     }

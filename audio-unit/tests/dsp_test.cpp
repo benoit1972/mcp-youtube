@@ -165,11 +165,80 @@ int main()
         CHECK (ons > 150 && ons < 190);
         CHECK (ons - offs >= 0 && ons - offs <= gg::NoteGen::maxPending);
 
+        // scale taken from MIDI: only the played pitch classes (C, E, G) may come out
+        gg::NoteGen gm; gm.prepare (sr);
+        gg::GenParams mp; mp.probability = 1.f; mp.scale = 6; mp.scaleMask = (1u << 0) | (1u << 4) | (1u << 7); mp.rateDiv = 3; mp.bpm = 120;
+        int mOn = 0;
+        for (int blk = 0; blk < 2000; ++blk)
+        {
+            const int c = gm.generate (512, mp, ev, 256);
+            for (int i = 0; i < c; ++i)
+                if (ev[i].on) { ++mOn; const int pc = ev[i].note % 12; CHECK (pc == 0 || pc == 4 || pc == 7); }
+        }
+        CHECK (mOn > 50);
+        // nothing played yet (mask 0): falls back to a normal scale instead of staying silent
+        gg::NoteGen gf; gf.prepare (sr);
+        mp.scaleMask = 0;
+        int fOn = 0;
+        for (int blk = 0; blk < 2000; ++blk) { const int c = gf.generate (512, mp, ev, 256); for (int i = 0; i < c; ++i) fOn += ev[i].on; }
+        CHECK (fOn > 50);
+
         gg::NoteGen g0; g0.prepare (sr);
         gp2.probability = 0.f;
         int silent = 0;
         for (int blk = 0; blk < 200; ++blk) silent += g0.generate (512, gp2, ev, 256);
         CHECK (silent == 0);
+    }
+
+    // ---- anti-residual-sound guarantees ----
+    {
+        // 1) stutter/glitch fully off while no key is held, even at 100 %
+        gg::GlitchFx f; f.prepare (sr, 99u);
+        gg::FxParams q; q.stutterAmount = 1.f; q.glitchAmount = 1.f; q.glitchDiv = 3; q.stutterDiv = 2; q.active = false;
+        double md2 = 0;
+        for (int i = 0; i < (int) sr * 3; ++i)
+        {
+            float l = std::sin (0.04f * (float) i), r = l, l0 = l;
+            f.process (l, r, q);
+            md2 = std::max (md2, (double) std::abs (l - l0));
+        }
+        CHECK (md2 < 1e-6);
+
+        // 2) active for 2 s, then keys released: dry again within a few ms
+        gg::GlitchFx g2; g2.prepare (sr, 5u);
+        q.active = true;
+        for (int i = 0; i < (int) sr * 2; ++i) { float l = std::sin (0.04f * (float) i), r = l; g2.process (l, r, q); }
+        q.active = false;
+        double after = 0;
+        for (int i = 0; i < 2000; ++i)
+        {
+            float l = std::sin (0.04f * (float) i), r = l, l0 = l;
+            g2.process (l, r, q);
+            if (i > 1500) after = std::max (after, (double) std::abs (l - l0));
+        }
+        CHECK (after < 1e-3);
+
+        // 3) tape with silence in must give exact silence out (no hiss)
+        gg::AmbientFx a; a.prepare (sr);
+        gg::AmbientParams tp; tp.tape = 1.f; tp.delayMix = 0.f; tp.reverbMix = 0.f; tp.shimmer = 0.f;
+        double hiss = 0;
+        for (int i = 0; i < (int) sr; ++i) { float l = 0.f, r = 0.f; a.process (l, r, tp); hiss = std::max (hiss, (double) std::max (std::abs (l), std::abs (r))); }
+        CHECK (hiss < 1e-9);
+
+        // 4) longest reverb (+ shimmer): after a burst, the tail is inaudible well within 12 s
+        gg::AmbientFx rv; rv.prepare (sr);
+        gg::AmbientParams rp2; rp2.reverbSize = 1.f; rp2.reverbMix = 1.f; rp2.shimmer = 1.f; rp2.delayMix = 0.f;
+        double pk = 0, tailPk = 0;
+        for (int i = 0; i < (int) sr * 12; ++i)
+        {
+            float l = i < 4800 ? std::sin (0.05f * (float) i) * 0.8f : 0.f, r = l;
+            rv.process (l, r, rp2);
+            const double m = std::max (std::abs (l), std::abs (r));
+            pk = std::max (pk, m);
+            if (i > (int) sr * 10) tailPk = std::max (tailPk, m);
+        }
+        std::printf ("reverb: peak %.3f, tail after 10 s %.6f (%.1f dB)\n", pk, tailPk, 20.0 * std::log10 (tailPk / pk + 1e-12));
+        CHECK (tailPk < pk * 0.003); // below -50 dB
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);

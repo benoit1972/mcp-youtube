@@ -55,6 +55,8 @@ private:
     gg::GlitchFx fx;
     gg::AmbientFx ambient;
     gg::NoteGen noteGen;
+    std::array<juce::int64, 12> lastHeard {}; // sample clock when each pitch class was last played (MIDI input only)
+    juce::int64 sampleClock = 0;
 
     struct Ev { int offset; int kind; int note; float vel; }; // kind: 0 on, 1 off, 2 all off
     std::vector<Ev> events;

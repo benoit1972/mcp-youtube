@@ -290,6 +290,13 @@ public:
 
     void allNotesOff() { for (auto& v : voices) v.kill(); }
 
+    // true while at least one key is physically held (voices in release do not count)
+    bool anyHeld() const
+    {
+        for (const auto& v : voices) if (v.isActive() && v.isHeld()) return true;
+        return false;
+    }
+
     // Adds into L/R (caller clears).
     void render (float* L, float* R, int numSamples, const SourceBuffer& src, const GrainParams& p)
     {

@@ -9,7 +9,7 @@ Trois pages (onglets **Grain / Play / FX**) pour garder l'écran d'accueil lége
 - **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.
 
-Bouton **Random** : tire au hasard tous les paramètres (sauf *Level*, pour protéger les oreilles) dans des plages musicales.
+Bouton **Random** : tire au hasard tous les paramètres sauf *Level* (pour protéger les oreilles) et ceux de *Drift* (qui ne doit pas se mettre à jouer tout seul) dans des plages musicales.
 **Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger ; le bouton **Load** reste disponible en secours. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement
@@ -44,7 +44,8 @@ Les horloges suivent le tempo de l'hôte (120 BPM par défaut) mais ne sont **pa
 
 **Drift** (notes génératives) : à chaque pas (1 mesure … 1/16, selon le tempo), avec une probabilité *Drift*, une marche aléatoire
 dans la gamme choisie (majeure, mineure, pentatonique, dorien, lydien, tons entiers ; tonique au choix ; 3 octaves) joue une note
-dans le synthé. Fonctionne sans MIDI ; le jeu MIDI se mélange aux notes générées.
+dans le synthé. L'option de gamme **From MIDI** prend pour gamme les notes (classes de hauteur) que tu as jouées sur le clavier
+MIDI pendant les 20 dernières secondes ; tant que rien n'a été joué, Drift utilise la pentatonique. Fonctionne sans MIDI ; le jeu MIDI se mélange aux notes générées.
 
 > Instrument original. Il est *inspiré par la liste de fonctions* de GrainBrick (TrimUI Brick, code source fermé) mais n'en reprend
 > ni code ni nom ; le moteur de notes, les effets et l'interface sont écrits ici de zéro.
