@@ -16,7 +16,8 @@ constexpr int kNumSources = 11;
 struct ModDest { const char* id; const char* label; };
 
 inline constexpr ModDest kModDests[] = {
-    { "position", "Position" },     { "spray", "Spray" },           { "size", "Grain size" },
+    { "position", "Position" },     { "scan", "Scan speed" },       { "spray", "Spray" },
+    { "size", "Grain size" },
     { "density", "Density" },       { "shape", "Window" },          { "pitch", "Pitch" },
     { "pitchSpray", "Pitch spray" }, { "reverse", "Reverse" },      { "pan", "Stereo" },
     { "attack", "Attack" },         { "decay", "Decay" },           { "sustain", "Sustain" },
@@ -52,27 +53,8 @@ inline void accumulate (const float* srcValues, const Matrix& m, float* offsets)
     }
 }
 
-// Default macro assignments: one musical theme per macro.
-struct Theme { const char* ids[3]; float amounts[3]; };
-inline constexpr Theme kThemes[kNumMacros] = {
-    { { "position", "spray", "shape" },         { 0.50f, 0.40f, 0.30f } },   // texture
-    { { "density", "size", "reverse" },         { 0.40f, -0.25f, 0.30f } },  // cloud
-    { { "pitch", "pitchSpray", "pan" },         { 0.10f, 0.40f, 0.30f } },   // pitch
-    { { "reverbMix", "reverbSize", "shimmer" }, { 0.50f, 0.30f, 0.40f } },   // space
-    { { "delayMix", "delayFb", "delayTime" },   { 0.50f, 0.30f, 0.20f } },   // echo
-    { { "tape", "glitch", "stutter" },          { 0.50f, 0.30f, 0.30f } },   // grit
-    { { "attack", "release", "sustain" },       { 0.30f, 0.40f, -0.20f } },  // envelope
-    { { "drift", "reverbDamp", "decay" },       { 0.40f, 0.30f, 0.30f } },   // motion
-};
-
-inline Matrix defaultMatrix()
-{
-    Matrix m;
-    for (int s = 0; s < kNumMacros; ++s)
-        for (int k = 0; k < 3; ++k)
-            m.amt[s][destIndexOf (kThemes[s].ids[k]) - 1] = kThemes[s].amounts[k];
-    return m;
-}
+// The matrix starts empty: nothing is modulated until you assign it.
+inline Matrix defaultMatrix() { return Matrix{}; }
 
 // Random assignment of the 8 macro columns: each macro gets 2-4 distinct, randomly chosen parameters
 // with moderate, mostly positive amounts. Pitch moves gently, and Level is never assigned (no volume surprises).

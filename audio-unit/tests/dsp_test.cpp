@@ -249,7 +249,7 @@ int main()
         float src[gg::kNumSources] = {};
         float off[gg::kNumDests];
         const int dPos = gg::destIndexOf ("position"), dSpray = gg::destIndexOf ("spray"), dLevel = gg::destIndexOf ("level");
-        CHECK (dPos == 1 && dSpray == 2 && gg::destIndexOf ("nope") == 0 && dLevel == gg::kNumDests);
+        CHECK (dPos == 1 && gg::destIndexOf ("scan") == 2 && dSpray == 3 && gg::destIndexOf ("nope") == 0 && dLevel == gg::kNumDests);
 
         gg::accumulate (src, m, off);
         for (int d = 0; d < gg::kNumDests; ++d) CHECK (off[d] == 0.f);
@@ -263,16 +263,10 @@ int main()
         CHECK (std::abs (off[dSpray - 1] - (-0.25f + 0.2f)) < 1e-6f);
         CHECK (std::abs (off[dLevel - 1] + 0.1f) < 1e-6f);
 
-        // default matrix: every macro has its 3 theme destinations
+        // the matrix starts completely empty
         const auto dm = gg::defaultMatrix();
-        for (int s = 0; s < gg::kNumMacros; ++s)
-        {
-            int n = 0;
-            for (int d = 0; d < gg::kNumDests; ++d) n += dm.amt[s][d] != 0.f;
-            CHECK (n == 3);
-        }
-        for (int s = gg::kNumMacros; s < gg::kNumSources; ++s)
-            for (int d = 0; d < gg::kNumDests; ++d) CHECK (dm.amt[s][d] == 0.f);
+        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
+            for (int d = 0; d < gg::kNumDests; ++d) CHECK (dm.amt[sIdx][d] == 0.f);
 
         // random macro assignment: 2-4 distinct params per macro, bounded, never Level, LFO/SEQ columns untouched
         for (uint32_t seed = 1; seed <= 300; ++seed)
@@ -350,6 +344,60 @@ int main()
         // 3000*128 samples = 8 s, 1/16 at 120 bpm = 0.125 s/step, 4 steps with 1 hit => 2 hits/s => ~16 hits
         std::printf ("seq: %d hits fired in 8 s\n", fired);
         CHECK (fired >= 12 && fired <= 20);
+    }
+
+    // ---- neutral defaults: a loaded sound is heard as it is ----
+    {
+        auto sb = std::make_shared<gg::SourceBuffer>();
+        sb->sampleRate = sr;
+        const int total = (int) sr * 2;
+        sb->l.resize ((size_t) total); sb->r.resize ((size_t) total);
+        for (int i = 0; i < total; ++i)
+        {
+            const double t = (double) i / sr, f = t < 1.0 ? 220.0 : 440.0;
+            sb->l[(size_t) i] = sb->r[(size_t) i] = 0.5f * (float) std::sin (2.0 * 3.14159265358979 * f * t);
+        }
+        gg::GranularEngine ge; ge.prepare (sr);
+        gg::GrainParams neutral;            // the defaults
+        ge.noteOn (60, 1.f);
+        std::vector<float> oL ((size_t) total), oR ((size_t) total);
+        ge.render (oL.data(), oR.data(), total, *sb, neutral);
+
+        auto rmsOf = [] (const std::vector<float>& v, int a, int b)
+        {
+            double acc = 0; for (int i = a; i < b; ++i) acc += (double) v[(size_t) i] * v[(size_t) i];
+            return std::sqrt (acc / (double) (b - a));
+        };
+        auto rises = [] (const std::vector<float>& v, int a, int b)
+        {
+            int c = 0; for (int i = a + 1; i < b; ++i) if (v[(size_t) i - 1] < 0.f && v[(size_t) i] >= 0.f) ++c;
+            return c;
+        };
+        const double inRms = 0.5 / std::sqrt (2.0);
+        const double r1 = rmsOf (oL, (int) (0.3 * sr), (int) (0.9 * sr)) / inRms;
+        const double r2 = rmsOf (oL, (int) (1.2 * sr), (int) (1.9 * sr)) / inRms;
+        const int z1 = rises (oL, (int) (0.2 * sr), (int) (0.8 * sr)), z2 = rises (oL, (int) (1.2 * sr), (int) (1.8 * sr));
+        std::printf ("neutral playback: level %.2f / %.2f of the source, %d and %d cycles (expected ~132 and ~264)\n", r1, r2, z1, z2);
+        CHECK (r1 > 0.8 && r1 < 1.2 && r2 > 0.8 && r2 < 1.2);   // same loudness as the source
+        CHECK (z1 > 120 && z1 < 144);                             // 220 Hz first second
+        CHECK (z2 > 245 && z2 < 283);                             // 440 Hz second: the playhead really advances
+        double lr = 0; for (int i = 0; i < total; ++i) lr = std::max (lr, (double) std::abs (oL[(size_t) i] - oR[(size_t) i]));
+        CHECK (lr < 1e-5);                                        // centred, no stereo spread
+
+        // Scan = 0 freezes the playhead: the second half (440 Hz) is never reached
+        gg::GranularEngine gz; gz.prepare (sr);
+        gg::GrainParams frozen; frozen.scan = 0.f;
+        gz.noteOn (60, 1.f);
+        std::vector<float> fL ((size_t) total), fR ((size_t) total);
+        gz.render (fL.data(), fR.data(), total, *sb, frozen);
+        const int fz = rises (fL, (int) (1.2 * sr), (int) (1.8 * sr));
+        CHECK (fz > 120 && fz < 144);
+
+        // limiter: untouched below 0.8, never above 1, monotonic
+        CHECK (gg::softClip (0.5f) == 0.5f && gg::softClip (-0.79f) == -0.79f);
+        float last = 0.f;
+        for (int i = 0; i <= 400; ++i) { const float y = gg::softClip ((float) i * 0.01f); CHECK (y <= 1.0001f && y >= last - 1e-6f); last = y; }
+        CHECK (gg::softClip (5.f) <= 1.0f && gg::softClip (-5.f) >= -1.0f);
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);

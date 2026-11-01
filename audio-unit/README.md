@@ -4,16 +4,16 @@ Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant 
 
 ## Interface
 
-Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d'accueil léger. Tout démarre « à zéro » : effets, stutter, glitch, Drift et modulations de LFO/séquenceur sont désactivés, on sculpte d'abord le son (Grain, Play) puis on ajoute les effets :
+Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d'accueil léger. Tout démarre **neutre** : quand tu charges un son et joues une note (note MIDI 60, C3 dans Live = hauteur d'origine), tu l'entends **tel qu'il est** (position 0, Scan 1×, sans dispersion, sans effet, matrice vide) ; tu le construis ensuite en tournant les réglages :
 - **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains. Glisse un fichier audio dessus pour le charger.
 - **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.
 - **Mod** : les sources de modulation. 8 **macros** (les 8 potards à mapper dans Live), 2 **LFO** (sinus, triangle, dent de scie, carré, aléatoire ; libres en Hz ou synchronisés au tempo) et un **séquenceur euclidien** (1-16 pas, nombre de coups, rotation, vitesse, déclin, hasard) dont le motif s'affiche.
 - **Matrix** : la matrice de modulation. Lignes = tous les paramètres modulables, colonnes = les 11 sources (M1-M8, LFO1, LFO2, SEQ). Glisse une case vers le haut/bas pour régler la quantité (de -100 % à +100 % ; Maj = précis), double-clic = effacer, molette = défiler. Orange = positif, bleu = négatif. N'importe quelle source peut piloter n'importe quel paramètre, et plusieurs sources peuvent s'additionner sur un même paramètre.
 
-Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. Les macros ont des affectations par défaut (texture, nuage, hauteur, espace, écho, grain, enveloppe, mouvement) que tu peux changer dans la Matrix. Les modulations sont calculées une fois par bloc audio.
+Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. La matrice est **vide** au départ : rien n'est modulé tant que tu n'as pas affecté une case. Les modulations sont calculées une fois par bloc audio.
 
-Bouton **Reset** (en haut à droite, à gauche de Random) : remet **tous** les réglages à leur valeur neutre (effets, stutter, glitch, Drift, LFO, séquenceur et macros à zéro, matrice aux affectations par défaut des macros) pour repartir d'un son vierge. Il demande un second clic dans les 3 secondes (« Sure? »). L'échantillon chargé est conservé.
+Bouton **Reset** (en haut à droite, à gauche de Random) : remet **tous** les réglages à leur valeur neutre **et vide entièrement la matrice** pour repartir d'un son vierge (le son qui était chargé reste, et s'entend tel quel). Il demande un second clic dans les 3 secondes (« Sure? »). L'échantillon chargé est conservé.
 
 Bouton **Random** : agit sur la **page affichée** : Grain, Play ou FX = ces réglages ; Mod ou Matrix = donne aux 8 macros **des cibles aléatoires** dans la matrice (2 à 4 paramètres chacune) **et des valeurs aléatoires** (les colonnes LFO et séquenceur sont conservées) ; **Maj + clic** = Grain + Play + FX. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés.
 **Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger. Double-clic sur un potard : valeur par défaut.
@@ -25,7 +25,7 @@ Bouton **Random** : agit sur la **page affichée** : Grain, Play ou FX = ces ré
 
 | Paramètre | Rôle |
 |---|---|
-| Position / Spray | point de lecture dans l'échantillon / dispersion aléatoire |
+| Position / Scan / Spray | point de départ dans l'échantillon / vitesse de lecture (1× = normale, 0 = figé, négatif = à l'envers) / dispersion aléatoire |
 | Grain Size / Density | durée du grain (5–500 ms) / grains par seconde |
 | Window | forme de la fenêtre (Hann → quasi rectangulaire) |
 | Pitch / Pitch Spray | transposition / dispersion de hauteur par grain |

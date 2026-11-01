@@ -21,15 +21,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
 
     const juce::StringArray divisions { "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T", "1/32T" };
 
-    l.add (std::make_unique<F> (pid ("position"),   "Position",     Range (0.f, 1.f, 0.001f), 0.30f,
+    l.add (std::make_unique<F> (pid ("position"),   "Position",     Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("spray"),      "Spray",        Range (0.f, 1.f, 0.001f), 0.10f,
+    l.add (std::make_unique<F> (pid ("scan"),       "Scan Speed",   Range (-2.f, 2.f, 0.01f), 1.f,
+                                juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (x, 2) + " x"; })));
+    l.add (std::make_unique<F> (pid ("spray"),      "Spray",        Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("size"),       "Grain Size",   Range (5.f, 500.f, 0.1f, 0.4f), 80.f,
+    l.add (std::make_unique<F> (pid ("size"),       "Grain Size",   Range (5.f, 500.f, 0.1f, 0.4f), 120.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (ms)));
-    l.add (std::make_unique<F> (pid ("density"),    "Density",      Range (1.f, 200.f, 0.1f, 0.5f), 20.f,
+    l.add (std::make_unique<F> (pid ("density"),    "Density",      Range (1.f, 200.f, 0.1f, 0.5f), 30.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (hz)));
-    l.add (std::make_unique<F> (pid ("shape"),      "Window Shape", Range (0.f, 1.f, 0.001f), 0.30f,
+    l.add (std::make_unique<F> (pid ("shape"),      "Window Shape", Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<F> (pid ("pitch"),      "Pitch",        Range (-24.f, 24.f, 0.01f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (st)));
@@ -37,18 +39,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (st)));
     l.add (std::make_unique<F> (pid ("reverse"),    "Reverse",      Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("pan"),        "Stereo Spread", Range (0.f, 1.f, 0.001f), 0.5f,
+    l.add (std::make_unique<F> (pid ("pan"),        "Stereo Spread", Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("level"),      "Level",        Range (-48.f, 6.f, 0.1f), -6.f,
+    l.add (std::make_unique<F> (pid ("level"),      "Level",        Range (-48.f, 6.f, 0.1f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (db)));
 
     l.add (std::make_unique<F> (pid ("attack"),  "Attack",  Range (0.001f, 5.f, 0.001f, 0.35f), 0.01f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
     l.add (std::make_unique<F> (pid ("decay"),   "Decay",   Range (0.005f, 5.f, 0.001f, 0.35f), 0.3f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
-    l.add (std::make_unique<F> (pid ("sustain"), "Sustain", Range (0.f, 1.f, 0.001f), 0.8f,
+    l.add (std::make_unique<F> (pid ("sustain"), "Sustain", Range (0.f, 1.f, 0.001f), 1.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("release"), "Release", Range (0.005f, 8.f, 0.001f, 0.35f), 0.5f,
+    l.add (std::make_unique<F> (pid ("release"), "Release", Range (0.005f, 8.f, 0.001f, 0.35f), 0.4f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
 
     l.add (std::make_unique<F> (pid ("stutter"),      "Stutter",       Range (0.f, 1.f, 0.001f), 0.f,
@@ -250,7 +252,7 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
 
     gg::GrainParams gp;
-    gp.position = param ("position");   gp.spray = param ("spray");
+    gp.position = param ("position");   gp.scan = param ("scan");   gp.spray = param ("spray");
     gp.sizeMs = param ("size");         gp.density = param ("density");
     gp.shape = param ("shape");         gp.pitch = param ("pitch");
     gp.pitchSpray = param ("pitchSpray"); gp.reverse = param ("reverse");
@@ -339,8 +341,8 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         fx.process (l, r, fp);
         ambient.process (l, r, ap);
         const float g = level.getNextValue();
-        L[i] = std::tanh (l * g); // soft limiter keeps dense clouds / glitches from clipping
-        R[i] = std::tanh (r * g);
+        L[i] = gg::softClip (l * g); // transparent below 0.8, rounds off the peaks above
+        R[i] = gg::softClip (r * g);
     }
 }
 
@@ -386,6 +388,7 @@ void GlitchGrainProcessor::randomise (RandomScope scope)
     struct R { const char* id; float lo, hi; };
     static const R ranges[] = {
         { "size", 0.10f, 0.85f },   { "density", 0.20f, 0.90f },  { "pitch", 0.25f, 0.75f },
+        { "scan", 0.40f, 0.85f },
         { "pitchSpray", 0.f, 0.5f }, { "reverse", 0.f, 0.7f },
         { "attack", 0.f, 0.45f },   { "decay", 0.10f, 0.70f },    { "sustain", 0.40f, 1.f },
         { "release", 0.10f, 0.50f },
@@ -393,7 +396,7 @@ void GlitchGrainProcessor::randomise (RandomScope scope)
         { "tape", 0.f, 0.7f },      { "delayFb", 0.f, 0.6f },     { "delayMix", 0.f, 0.45f },
         { "reverbSize", 0.2f, 0.8f }, { "reverbMix", 0.05f, 0.45f }, { "shimmer", 0.f, 0.5f },
     };
-    static const char* const grain[] = { "position", "spray", "size", "density", "shape", "pitch", "pitchSpray", "reverse", "pan" };
+    static const char* const grain[] = { "position", "scan", "spray", "size", "density", "shape", "pitch", "pitchSpray", "reverse", "pan" };
     static const char* const play[] = { "attack", "decay", "sustain", "release" };
     static const char* const fx[] = { "stutter", "stutterRate", "stutterPitch", "glitch", "glitchRate", "tape", "delayTime",
                                       "delayFb", "delayMix", "reverbSize", "reverbDamp", "reverbMix", "shimmer" };

@@ -58,19 +58,32 @@ struct SourceBuffer
     }
 };
 
+// Output limiter that leaves everything below 0.8 untouched (so a sound is heard as it is)
+// and only rounds off the peaks above it, never exceeding 1.
+inline float softClip (float x)
+{
+    const float a = std::abs (x);
+    if (a <= 0.8f) return x;
+    const float y = 0.8f + 0.2f * std::tanh ((a - 0.8f) / 0.2f);
+    return x < 0.f ? -y : y;
+}
+
 //==============================================================================
 struct GrainParams
 {
-    float position = 0.3f;   // 0..1 read position in the source
-    float spray = 0.1f;      // 0..1 random position offset (fraction of source)
-    float sizeMs = 80.f;     // grain length
-    float density = 20.f;    // grains per second per voice
+    // Defaults are neutral: a note plays the loaded sound as it is (position 0, playhead scanning at 1x,
+    // no spray / pitch spray / reverse, centred, Hann windows with ~4x overlap).
+    float position = 0.f;    // 0..1 where the note starts in the source
+    float scan = 1.f;        // playhead speed: 1 = natural, 0 = frozen at position, negative = backwards
+    float spray = 0.f;       // 0..1 random position offset (fraction of source)
+    float sizeMs = 120.f;    // grain length
+    float density = 30.f;    // grains per second per voice
     float pitch = 0.f;       // semitones
     float pitchSpray = 0.f;  // +/- semitones, random per grain
     float reverse = 0.f;     // 0..1 probability a grain plays backwards
-    float panSpread = 0.5f;  // 0..1
-    float shape = 0.5f;      // 0 = hann, 1 = near-rectangular window
-    float attack = 0.01f, decay = 0.3f, sustain = 0.8f, release = 0.5f; // seconds / level
+    float panSpread = 0.f;   // 0..1
+    float shape = 0.f;       // 0 = hann, 1 = near-rectangular window
+    float attack = 0.01f, decay = 0.3f, sustain = 1.f, release = 0.4f; // seconds / level
 };
 
 //==============================================================================
@@ -170,6 +183,7 @@ public:
     {
         note = n; velocity = vel; startOrder = order; held = true;
         countdown = 0.f;
+        scanFrac = 0.0;
         env.noteOn();
     }
     void noteOff() { held = false; env.noteOff(); }
@@ -185,6 +199,10 @@ public:
         if (! env.isActive() || src.size() < 2) return;
         env.setParams (p.attack, p.decay, p.sustain, p.release);
         const float interval = sr / std::max (1.f, p.density);
+        // spacing is almost regular unless Spray asks for a looser cloud (regular overlap = transparent playback)
+        const float jitter = 0.02f + 0.23f * std::min (1.f, p.spray * 4.f);
+        // playhead advance per output sample, as a fraction of the source (natural speed at scan = 1)
+        const double scanInc = (double) p.scan * src.sampleRate / ((double) sr * (double) src.size());
         const float overlap = std::max (1.f, p.density * p.sizeMs * 0.001f);
         const float norm = velocity / std::sqrt (overlap);
 
@@ -193,9 +211,11 @@ public:
             if (countdown <= 0.f)
             {
                 spawn (src, p, norm);
-                countdown += interval * (0.75f + 0.5f * rng.uni());
+                countdown += interval * (1.f - jitter + 2.f * jitter * rng.uni());
             }
             countdown -= 1.f;
+            scanFrac += scanInc;
+            if (scanFrac >= 1.0 || scanFrac < 0.0) scanFrac -= std::floor (scanFrac);
 
             float l = 0.f, r = 0.f;
             for (auto& g : grains)
@@ -221,7 +241,7 @@ private:
         g->age = 0;
         g->fade = 0.5f - 0.45f * std::clamp (p.shape, 0.f, 1.f);
 
-        double start = (double) p.position + (double) p.spray * rng.bi();
+        double start = (double) p.position + scanFrac + (double) p.spray * rng.bi();
         start -= std::floor (start);
 
         const double semis = (double) (note - 60) + p.pitch + p.pitchSpray * rng.bi();
@@ -246,6 +266,7 @@ private:
     Envelope env;
     Rng rng;
     float sr = 48000.f, countdown = 0.f, velocity = 1.f;
+    double scanFrac = 0.0;
     int note = 60;
     bool held = false;
     uint64_t startOrder = 0;

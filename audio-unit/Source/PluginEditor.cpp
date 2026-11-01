@@ -349,7 +349,7 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
 
     // page 0: GRAIN (home, light)
     pages[0].waveform = true;
-    addRow (0, "Grain cloud", Cell::Big, 5, { { "position", "Position" }, { "spray", "Spray" }, { "size", "Grain size" },
+    addRow (0, "Grain cloud", Cell::Big, 6, { { "position", "Position" }, { "scan", "Scan" }, { "spray", "Spray" }, { "size", "Grain size" },
                                               { "density", "Density" }, { "pitch", "Pitch" } });
     addRow (0, "Texture & output", Cell::Small, 5, { { "shape", "Window" }, { "pitchSpray", "Pitch spray" }, { "reverse", "Reverse" },
                                                      { "pan", "Stereo" }, { "level", "Level" } });
