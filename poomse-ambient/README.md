@@ -6,11 +6,18 @@ variations, moments légers et profonds, surprises. Rien ne se répète.
 
 ## Comment il compose (à la Eno)
 
-Six couches indépendantes, chacune une « boucle de bande » d'une longueur différente (7,3 / 9,7 / 17,9 / 24,7 / 41,3 temps…) :
-elles se déphasent sans jamais retomber au même endroit. Le morceau traverse des **scènes** : *légère* (peu de notes, de l'air),
-*profonde* (nappe, basse, voix plus graves), *calme* (une pause : pluie et queues de réverb). Il y a un **arc** sur toute la durée
-(il monte, culmine, redescend) et des **surprises** rares : phrase de voix fantôme, chute de la basse, petit roulement, note colorée
-hors gamme. Les accords bougent lentement. Les notes restent dans la gamme choisie.
+Le principe d'Eno (*Music for Airports*) : **chaque boucle joue toujours la même note**, répétée à sa propre cadence. Il n'y a que quelques
+notes en tout, toutes consonantes entre elles ; l'imprévisible vient uniquement du **décalage** entre boucles de longueurs différentes,
+jamais de notes tirées au hasard à chaque fois.
+
+- Le plugin réduit la gamme choisie à **cinq notes qui ne frottent jamais** (pas de demi-ton entre deux d'entre elles) : c'est le « jeu de notes » du morceau.
+- Chaque couche est faite de **voix** : une voix = une de ces cinq notes, toujours la même, avec sa propre durée de boucle
+  (7,3 / 9,1 / 11,7 / 14,3 / 17,9 / 23,3 / 24,7 / 31,9 temps…, jamais multiples les uns des autres). Elles se déphasent sans jamais retomber au même endroit.
+- L'**harmonie** ne bouge que rarement et doucement : tout le jeu de notes glisse d'une quarte ou d'une quinte (quatre notes sur cinq restent communes), puis revient.
+- Le morceau traverse des **scènes** : *légère* (peu de notes, de l'air), *profonde* (nappe, basse, voix plus graves), *calme* (une pause : pluie et queues de réverb),
+  sur un **arc** (il monte, culmine, redescend). Les **surprises** sont rares et restent dans le jeu de notes : phrase de voix fantôme qui descend, chute de la basse,
+  petit roulement, note aiguë isolée.
+- Mesuré dans les tests : dans les 8 gammes et les 2 styles, **aucune paire de notes qui sonnent ensemble ne forme un demi-ton ou une septième majeure**.
 
 ## Les six couches (un sample chacune : glisse-le sur la zone)
 

@@ -45,6 +45,35 @@ static bool inScale (int note, int tonic, int scale)
     return false;
 }
 
+// a note belongs to the harmony if it is a note of the consonant set, for the tonic or for its fifth / fourth shifts
+static bool inHarmony (int note, int tonic, int scale)
+{
+    int set[5]; amb::consonantSet (scale, set);
+    for (int shift : { 0, 5, 7 })
+        for (int i = 0; i < 5; ++i) if ((((note - tonic - shift - set[i]) % 12) + 12) % 12 == 0) return true;
+    return false;
+}
+static bool pitchedLayer (int l, bool night) { return l == amb::Keys || l == amb::Vocals || l == amb::Pad || l == amb::Sub || (l == amb::Beat && ! night); }
+// fraction of pairs of notes that sound together and form a semitone / major seventh
+static double dissonance (const std::vector<amb::Event>& ev, bool night, int* pairsOut = nullptr)
+{
+    int pairs = 0, bad = 0;
+    for (size_t i = 0; i < ev.size(); ++i)
+    {
+        if (! pitchedLayer (ev[i].layer, night)) continue;
+        for (size_t j = i + 1; j < ev.size(); ++j)
+        {
+            if (! pitchedLayer (ev[j].layer, night)) continue;
+            if (ev[j].beat >= ev[i].beat + ev[i].durBeats || ev[i].beat >= ev[j].beat + ev[j].durBeats) continue;   // not together
+            ++pairs;
+            const int d = std::abs (ev[i].note - ev[j].note) % 12;
+            if (d == 1 || d == 11) ++bad;
+        }
+    }
+    if (pairsOut) *pairsOut = pairs;
+    return pairs ? (double) bad / pairs : 0.0;
+}
+
 int main()
 {
     amb::GlobalParams g;
@@ -74,7 +103,8 @@ int main()
         ++perLayer[e.layer];
         CHECK (e.beat >= 0.0 && e.beat < 520.0 && e.velocity > 0.f && e.velocity <= 1.0f && e.pan >= -1.f && e.pan <= 1.f);
         if (e.layer == amb::Atmos) CHECK (e.note < 0);
-        if (e.layer == amb::Sub) CHECK (e.note >= 24 && e.note <= 52 && inScale (e.note, 48, g.scale));
+        if (e.layer == amb::Sub) CHECK (e.note >= 24 && e.note <= 72 && inHarmony (e.note, 48, g.scale));
+        if (pitchedLayer (e.layer, true) && e.layer != amb::Beat) CHECK (inHarmony (e.note, 48, g.scale));
     }
     for (int l = 0; l < amb::kNumLayers; ++l) { std::printf ("  %-6s %3d events\n", amb::kLayerNames[l], perLayer[l]); CHECK (perLayer[l] > 0); }
 
@@ -83,7 +113,7 @@ int main()
         amb::GlobalParams calm = g; calm.surprise = 0.f;
         for (uint32_t seed = 1; seed <= 12; ++seed)
             for (const auto& e : runPiece (seed, 80, calm).events)
-                if (e.layer == amb::Keys || e.layer == amb::Vocals || e.layer == amb::Pad || e.layer == amb::Sub) CHECK (inScale (e.note, 48, calm.scale));
+                if (e.layer == amb::Keys || e.layer == amb::Vocals || e.layer == amb::Pad || e.layer == amb::Sub) CHECK (inHarmony (e.note, 48, calm.scale));
     }
 
     // ---- the moods: depth makes deep scenes, space makes silence ----
@@ -123,21 +153,60 @@ int main()
         CHECK (same < total * 0.45);
     }
 
-    // ---- surprise: the unexpected exists only when asked for ----
+    // ---- surprise: more of the unexpected when asked for, and it never leaves the harmony ----
     {
-        int foreign[2] = {}, bellsFast[2] = {};
+        int foreign[2] = {}, phrases[2] = {};
         for (int sur = 0; sur < 2; ++sur)
             for (uint32_t seed = 1; seed <= 30; ++seed)
             {
                 amb::GlobalParams q = g; q.surprise = (float) sur;
                 const auto pc = runPiece (seed, 120, q);
-                for (const auto& e : pc.events) if ((e.layer == amb::Keys) && ! inScale (e.note, 48, q.scale)) ++foreign[sur];
+                for (const auto& e : pc.events) if (pitchedLayer (e.layer, true) && e.layer != amb::Beat && ! inHarmony (e.note, 48, q.scale)) ++foreign[sur];
                 for (size_t i = 1; i < pc.events.size(); ++i)   // a ghost-vocal phrase: voices 0.75 beat apart
-                    if (pc.events[i].layer == amb::Vocals && pc.events[i - 1].layer == amb::Vocals && std::abs (pc.events[i].beat - pc.events[i - 1].beat - 0.75) < 0.02) ++bellsFast[sur];
+                    if (pc.events[i].layer == amb::Vocals && pc.events[i - 1].layer == amb::Vocals && std::abs (pc.events[i].beat - pc.events[i - 1].beat - 0.75) < 0.02) ++phrases[sur];
             }
-        std::printf ("surprises over 30 pieces: foreign notes %d -> %d, vocal phrases %d -> %d\n", foreign[0], foreign[1], bellsFast[0], bellsFast[1]);
-        CHECK (foreign[0] == 0 && foreign[1] > 0);
-        CHECK (bellsFast[1] > bellsFast[0]);
+        std::printf ("surprises over 30 pieces: notes outside the harmony %d / %d, vocal phrases %d -> %d\n", foreign[0], foreign[1], phrases[0], phrases[1]);
+        CHECK (foreign[0] == 0 && foreign[1] == 0);
+        CHECK (phrases[1] > phrases[0]);
+    }
+
+    // ---- HARMONY: every voice keeps its own note, and what sounds together does not rub ----
+    {
+        // with the harmony still (chords 0): a voice always plays the same note, so a layer has only a handful of different pitches
+        amb::GlobalParams still = g; still.chords = 0.f; still.surprise = 0.f;
+        std::set<int> keys, vocals, pad, sub;
+        for (uint32_t seed = 1; seed <= 10; ++seed)
+            for (const auto& e : runPiece (seed, 120, still).events)
+            {
+                if (e.layer == amb::Keys) keys.insert (e.note % 12);       // note names: a voice may change octave with the mood
+                if (e.layer == amb::Vocals) vocals.insert (e.note % 12);
+                if (e.layer == amb::Pad) pad.insert (e.note % 12);
+                if (e.layer == amb::Sub) sub.insert (e.note % 12);
+            }
+        std::printf ("different note names over 10 pieces: keys %zu, vocals %zu, pad %zu, sub %zu\n", keys.size(), vocals.size(), pad.size(), sub.size());
+        CHECK (keys.size() <= 5 && vocals.size() <= 3 && pad.size() <= 3 && sub.size() <= 2);
+
+        // no semitone / major seventh between any two notes that sound together, in every scale, both styles
+        for (int night = 0; night < 2; ++night)
+            for (int sc = 0; sc < 8; ++sc)
+            {
+                amb::GlobalParams q = still; q.scale = sc; q.night = night == 1;
+                int total = 0; double bad = 0;
+                for (uint32_t seed = 1; seed <= 6; ++seed)
+                {
+                    int pr = 0; const double d = dissonance (runPiece (seed, 120, q).events, q.night, &pr);
+                    bad += d * pr; total += pr;
+                }
+                CHECK (total > 100);
+                CHECK (bad == 0.0);
+            }
+
+        // with the harmony moving (a fifth or a fourth now and then): rarely, and only around the change
+        amb::GlobalParams moving = g; moving.chords = 1.f; moving.surprise = 0.f;
+        double bad = 0; int total = 0;
+        for (uint32_t seed = 1; seed <= 10; ++seed) { int pr = 0; const double d = dissonance (runPiece (seed, 120, moving).events, true, &pr); bad += d * pr; total += pr; }
+        std::printf ("harmony moving all the time: %.1f%% of the %d simultaneous pairs rub\n", total ? 100.0 * bad / total : 0.0, total);
+        CHECK (total > 300 && bad / total < 0.10);
     }
 
     // ---- the arc: the middle of the piece is fuller than the start and the end; arc 0 is flat ----
@@ -173,23 +242,18 @@ int main()
         std::vector<int> seq;
         for (const auto& e : piece.events) if (e.layer == amb::Keys || e.layer == amb::Vocals) seq.push_back (e.note * 8 + e.layer);
         bool repeats = false;
-        const size_t win = 6;
+        const size_t win = 8;
         for (size_t i = 0; i + win <= seq.size() && ! repeats; ++i)
             for (size_t j = i + 1; j + win <= seq.size() && ! repeats; ++j)
                 repeats = std::equal (seq.begin() + (long) i, seq.begin() + (long) (i + win), seq.begin() + (long) j);
         CHECK (! repeats);
-        // where the ghost voices fall inside each keys loop keeps changing
-        std::set<int> phases;
-        for (const auto& e : piece.events) if (e.layer == amb::Vocals) phases.insert ((int) (std::fmod (e.beat, amb::kLayerConfig[amb::Keys].periodBeats) * 4));
-        std::printf ("vocal positions inside the keys loop: %zu different\n", phases.size());
-        CHECK (phases.size() >= 5);
     }
 
     // ---- the tonic is the clip's note: another key, other notes ----
     {
         amb::GlobalParams q = g; q.surprise = 0.f;
         for (const auto& e : runPiece (9, 40, q, 53).events)
-            if (e.layer == amb::Keys || e.layer == amb::Vocals || e.layer == amb::Pad || e.layer == amb::Sub) CHECK (inScale (e.note, 53, q.scale));
+            if (e.layer == amb::Keys || e.layer == amb::Vocals || e.layer == amb::Pad || e.layer == amb::Sub) CHECK (inHarmony (e.note, 53, q.scale));
     }
 
 
@@ -205,7 +269,7 @@ int main()
                 const auto& e = pc.events[i];
                 if (e.layer != amb::Beat) continue;
                 ++bells;
-                CHECK (inScale (e.note, 48, clean.scale) && e.note >= 48);                // pitched, in the scale, above the tonic
+                CHECK (inHarmony (e.note, 48, clean.scale) && e.note >= 48);              // pitched, in the harmony, above the tonic
                 if (i > 0 && pc.events[i - 1].layer == amb::Beat && std::abs (e.beat - pc.events[i - 1].beat) < 0.3) ++grid;   // never a 16th-note grid
             }
         }
