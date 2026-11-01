@@ -193,9 +193,9 @@ void PoomseGlitchEditor::paint (juce::Graphics& g)
     // wordmark
     g.setFont (look::caps (21.f, true, 0.28f));
     g.setColour (look::text);
-    g.drawText ("POOMSE", kPad, 16, 120, 30, juce::Justification::centredLeft, false);
+    g.drawText ("POOMSE", kPad, 16, 150, 30, juce::Justification::centredLeft, false);
     g.setColour (look::accent);
-    g.drawText ("GLITCH", kPad + 112, 16, 140, 30, juce::Justification::centredLeft, false);
+    g.drawText ("GLITCH", kPad + 150, 16, 140, 30, juce::Justification::centredLeft, false);
 
     // separator under the tabs
     g.setColour (look::line);
