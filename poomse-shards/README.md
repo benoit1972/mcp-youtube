@@ -9,6 +9,9 @@ Tu glisses une boucle de batterie (ou tu gardes celle fournie : un « poum, chak
 
 Les changements sont **écrits, pas tirés au hasard** : la même mesure d'un même morceau se défait toujours de la même façon, et chaque mesure est différente de la précédente. « New edits » change de graine.
 
+## N'importe quel son
+Glisse un fichier audio sur la carte : une boucle de batterie, mais aussi un piano, une voix, un sample de synthé, un field recording. Le plugin coupe le son à chaque attaque ; **s'il n'y en a pas** (une nappe, une voix tenue), il le découpe en 16 morceaux réguliers, et tout fonctionne de la même façon. La longueur de la boucle (1, 2, 4 ou 8 mesures) est devinée à partir de la durée du fichier ; corrige-la avec « Loop length » si besoin. Les sons rythmiques, dont les attaques sont nettes, donnent les meilleurs résultats.
+
 ## Les touches
 **C3 à B3 : 12 personnalités** (pads du milieu) : Loop (quasi fidèle), Flip (à l'envers), Ratchet (roulements), Swap (les coups changent de place), Hollow (trous et rentrées), Bend (hauteurs, tape stop), Shove (décalages), Ghost (coups fantômes), Mirror (le temps à rebours), Storm (tout à la fois), Stretch (coups lents, étirés), Drift (calme au début de la mesure, sauvage à la fin).
 La vélocité accentue ou adoucit l'effet.

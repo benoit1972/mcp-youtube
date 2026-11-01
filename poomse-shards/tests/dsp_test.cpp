@@ -94,6 +94,17 @@ int main()
         sh::Kit sh2; sh2.sampleRate = 44100.0; sh2.x.assign (500, 0.3f); sh2.analyse();
         CHECK (sh2.slices.empty());
     }
+    // any sound can be dropped: one without attacks is cut into equal pieces, and plays
+    {
+        sh::Kit pad; pad.sampleRate = 44100.0;
+        for (int i = 0; i < 44100 * 6; ++i) pad.x.push_back (0.3f * (float) (std::sin (0.031 * i) + 0.6 * std::sin (0.047 * i)));
+        pad.analyse();
+        std::printf ("a sustained sound with no attacks: %zu pieces\n", pad.slices.size());
+        CHECK (pad.slices.size() == 16);
+        Run r (&pad, 8.0); r.p.mutate = 0.5f;
+        r.e.noteOn (kStorm, 0.8f, r.p); r.go (8 * 16 * 60.0 / 90.0 / 4.0);
+        CHECK (peakOf (r.out) > 0.05f && peakOf (r.out) <= 1.0f);
+    }
     // a longer, busier break must also be cut sensibly
     {
         sh::Kit k2 = sh::makeDefaultKit (48000.0);

@@ -89,7 +89,12 @@ struct Kit
             sl.start = std::max (0, s - (int) (0.0008 * sampleRate));
             slices.push_back (sl);
         }
-        if (slices.empty()) return;
+        // a sound with no clear attacks (a pad, a voice, a field recording) is cut into 16 equal pieces instead: any sound can be played
+        if (slices.size() < 4)
+        {
+            slices.clear();
+            for (int i = 0; i < 16; ++i) { Slice sl; sl.start = (int) ((long long) i * n / 16); slices.push_back (sl); }
+        }
 
         // lengths, loudness, brightness
         const int maxLen = (int) (0.7 * sampleRate), minLen = (int) (0.03 * sampleRate);
