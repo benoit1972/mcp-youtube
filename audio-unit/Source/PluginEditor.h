@@ -31,6 +31,42 @@ private:
     int messageTicks = 0;
 };
 
+// Pattern of the euclidean sequencer (hits filled, current step ringed).
+class EuclidView : public juce::Component, private juce::Timer
+{
+public:
+    explicit EuclidView (GlitchGrainProcessor& p) : proc (p) { startTimerHz (30); }
+    void paint (juce::Graphics&) override;
+private:
+    void timerCallback() override { if (isVisible()) repaint(); }
+    GlitchGrainProcessor& proc;
+};
+
+// Modulation matrix: rows = parameters, columns = sources (8 macros, 2 LFOs, sequencer).
+// Drag a cell up/down to set its amount (Shift = fine), double-click to clear, wheel to scroll.
+class ModMatrixView : public juce::Component, private juce::Timer
+{
+public:
+    explicit ModMatrixView (GlitchGrainProcessor&);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override { hoverSrc = hoverDest = -1; repaint(); }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    void timerCallback() override { if (isVisible()) repaint(); }
+    bool cellAt (juce::Point<int>, int& src, int& dest) const;
+    int maxScroll() const;
+
+    GlitchGrainProcessor& proc;
+    float scroll = 0.f;
+    int hoverSrc = -1, hoverDest = -1, dragSrc = -1, dragDest = -1, dragStartY = 0;
+    float dragStartValue = 0.f;
+};
+
 class PoomseGlitchEditor : public juce::AudioProcessorEditor
 {
 public:
@@ -41,6 +77,7 @@ public:
 
 private:
     enum class Cell { Big, Small, Mini };
+    static constexpr int kNumKnobPages = 4;   // Grain, Play, FX, Mod   (page 4 = Matrix)
 
     struct Knob
     {
@@ -52,6 +89,7 @@ private:
     {
         juce::String title;
         Cell cell;
+        int cols = 5;
         juce::Array<Knob*> knobs;
         juce::Rectangle<int> titleBounds;
     };
@@ -60,31 +98,21 @@ private:
         bool waveform = false;
         std::vector<Row> rows;
     };
-    // Macros page: one knob + 3 (target, amount) slots per macro
-    struct MacroColumn
-    {
-        Knob knob;
-        juce::ComboBox target[gg::kSlotsPerMacro];
-        juce::Slider amount[gg::kSlotsPerMacro];
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> targetAtt[gg::kSlotsPerMacro];
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> amountAtt[gg::kSlotsPerMacro];
-    };
-    void buildMacroPage();
 
-    void addRow (int page, const char* title, Cell cell,
+    void addRow (int page, const char* title, Cell cell, int cols,
                  std::initializer_list<std::pair<const char*, const char*>> params);
     void showPage (int index);
 
     PoomseLookAndFeel laf;
     GlitchGrainProcessor& proc;
     juce::OwnedArray<Knob> knobs;
-    std::array<Page, 3> pages;
-    std::array<std::unique_ptr<MacroColumn>, gg::kNumMacros> macroCols;
-    juce::Rectangle<int> macroTitleBounds, macroHintBounds;
+    std::array<Page, kNumKnobPages> pages;
     int currentPage = 0;
 
     WaveformView waveform;
-    juce::TextButton tabButtons[4];
+    EuclidView euclid;
+    ModMatrixView matrixView;
+    juce::TextButton tabButtons[5];
     juce::TextButton randomButton { "Random" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseGlitchEditor)

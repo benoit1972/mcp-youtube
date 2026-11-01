@@ -4,12 +4,14 @@
 #include <cmath>
 #include <cstring>
 
-// 8 macros x 3 slots. Each slot = (destination parameter, bipolar amount).
-// The modulated value of a destination is   base + sum(macro * amount)   in normalised (0..1) units.
+// Modulation matrix: 11 sources (8 macros, 2 LFOs, 1 euclidean sequencer) x every modulatable parameter.
+// A cell is a bipolar amount (-1..+1): the modulated value of a destination is
+//     base + sum over sources( source value * amount )      in normalised (0..1) parameter units.
 namespace gg
 {
 constexpr int kNumMacros = 8;
-constexpr int kSlotsPerMacro = 3;
+constexpr int kSrcLfo1 = 8, kSrcLfo2 = 9, kSrcSeq = 10;
+constexpr int kNumSources = 11;
 
 struct ModDest { const char* id; const char* label; };
 
@@ -26,7 +28,7 @@ inline constexpr ModDest kModDests[] = {
 };
 constexpr int kNumDests = (int) (sizeof (kModDests) / sizeof (kModDests[0]));
 
-// 1-based destination index of a parameter id (0 = none / not modulatable)
+// 1-based destination index of a parameter id (0 = not modulatable)
 inline int destIndexOf (const char* id)
 {
     for (int i = 0; i < kNumDests; ++i)
@@ -34,63 +36,66 @@ inline int destIndexOf (const char* id)
     return 0;
 }
 
-struct Slot
+struct Matrix
 {
-    int dest = 0;        // 0 = none, k = kModDests[k - 1]
-    float amount = 0.f;  // -1 .. +1
+    float amt[kNumSources][kNumDests] = {};
 };
 
-// offsets[d] = total normalised offset to add to destination d
-inline void accumulate (const float* macros, const Slot (*slots)[kSlotsPerMacro], float* offsets)
+// offsets[d] = total normalised offset added to destination d
+inline void accumulate (const float* srcValues, const Matrix& m, float* offsets)
 {
-    for (int d = 0; d < kNumDests; ++d) offsets[d] = 0.f;
-    for (int m = 0; m < kNumMacros; ++m)
-        for (int s = 0; s < kSlotsPerMacro; ++s)
-        {
-            const auto& sl = slots[m][s];
-            if (sl.dest >= 1 && sl.dest <= kNumDests && macros[m] != 0.f && sl.amount != 0.f)
-                offsets[sl.dest - 1] += macros[m] * sl.amount;
-        }
+    for (int d = 0; d < kNumDests; ++d)
+    {
+        float sum = 0.f;
+        for (int s = 0; s < kNumSources; ++s) sum += srcValues[s] * m.amt[s][d];
+        offsets[d] = sum;
+    }
 }
 
-// One musical theme per macro. Amounts are signed fractions of each parameter's full range.
-struct Theme { const char* ids[kSlotsPerMacro]; float amounts[kSlotsPerMacro]; };
+// Default macro assignments: one musical theme per macro.
+struct Theme { const char* ids[3]; float amounts[3]; };
 inline constexpr Theme kThemes[kNumMacros] = {
-    { { "position", "spray", "shape" },        { 0.50f, 0.40f, 0.30f } },   // texture
-    { { "density", "size", "reverse" },        { 0.40f, -0.25f, 0.30f } },  // cloud
-    { { "pitch", "pitchSpray", "pan" },        { 0.10f, 0.40f, 0.30f } },   // pitch
-    { { "reverbMix", "reverbSize", "shimmer" }, { 0.50f, 0.30f, 0.40f } },  // space
-    { { "delayMix", "delayFb", "delayTime" },  { 0.50f, 0.30f, 0.20f } },   // echo
-    { { "tape", "glitch", "stutter" },         { 0.50f, 0.30f, 0.30f } },   // grit
-    { { "attack", "release", "sustain" },      { 0.30f, 0.40f, -0.20f } },  // envelope
-    { { "drift", "reverbDamp", "decay" },      { 0.40f, 0.30f, 0.30f } },   // motion
+    { { "position", "spray", "shape" },         { 0.50f, 0.40f, 0.30f } },   // texture
+    { { "density", "size", "reverse" },         { 0.40f, -0.25f, 0.30f } },  // cloud
+    { { "pitch", "pitchSpray", "pan" },         { 0.10f, 0.40f, 0.30f } },   // pitch
+    { { "reverbMix", "reverbSize", "shimmer" }, { 0.50f, 0.30f, 0.40f } },   // space
+    { { "delayMix", "delayFb", "delayTime" },   { 0.50f, 0.30f, 0.20f } },   // echo
+    { { "tape", "glitch", "stutter" },          { 0.50f, 0.30f, 0.30f } },   // grit
+    { { "attack", "release", "sustain" },       { 0.30f, 0.40f, -0.20f } },  // envelope
+    { { "drift", "reverbDamp", "decay" },       { 0.40f, 0.30f, 0.30f } },   // motion
 };
 
-inline Slot defaultSlot (int macro, int slot)
+inline Matrix defaultMatrix()
 {
-    return { destIndexOf (kThemes[macro].ids[slot]), kThemes[macro].amounts[slot] };
+    Matrix m;
+    for (int s = 0; s < kNumMacros; ++s)
+        for (int k = 0; k < 3; ++k)
+            m.amt[s][destIndexOf (kThemes[s].ids[k]) - 1] = kThemes[s].amounts[k];
+    return m;
 }
 
-// Musical automatic assignment: every macro gets a distinct theme (shuffled), amounts are
-// moderate and mostly positive, pitch moves gently, and Level is never assigned (no volume surprises).
-inline void randomAssign (Rng& rng, Slot (*slots)[kSlotsPerMacro])
+// Random assignment of the 8 macro columns: each macro gets 2-4 distinct, randomly chosen parameters
+// with moderate, mostly positive amounts. Pitch moves gently, and Level is never assigned (no volume surprises).
+// LFO / sequencer columns are left untouched.
+inline void randomAssignMacros (Rng& rng, Matrix& m)
 {
-    int order[kNumMacros];
-    for (int i = 0; i < kNumMacros; ++i) order[i] = i;
-    for (int i = kNumMacros - 1; i > 0; --i)
-        std::swap (order[i], order[(int) (rng.uni() * (float) (i + 1)) % (i + 1)]);
-
-    for (int m = 0; m < kNumMacros; ++m)
-        for (int s = 0; s < kSlotsPerMacro; ++s)
+    const int levelIdx = destIndexOf ("level") - 1, pitchIdx = destIndexOf ("pitch") - 1,
+              delayTimeIdx = destIndexOf ("delayTime") - 1;
+    for (int s = 0; s < kNumMacros; ++s)
+    {
+        for (int d = 0; d < kNumDests; ++d) m.amt[s][d] = 0.f;
+        const int count = 2 + (int) (rng.uni() * 3.f) % 3; // 2..4
+        int placed = 0, guard = 0;
+        while (placed < count && guard++ < 200)
         {
-            const auto& th = kThemes[order[m]];
-            Slot sl;
-            sl.dest = destIndexOf (th.ids[s]);
-            float mag = 0.2f + 0.5f * rng.uni();                       // 20..70 %
-            if (std::strcmp (th.ids[s], "pitch") == 0) mag *= 0.3f;    // +-48 st range: keep it gentle
-            if (std::strcmp (th.ids[s], "delayTime") == 0) mag *= 0.5f;
-            sl.amount = (rng.uni() < 0.75f ? 1.f : -1.f) * mag;
-            slots[m][s] = sl;
+            const int d = (int) (rng.uni() * (float) kNumDests) % kNumDests;
+            if (d == levelIdx || m.amt[s][d] != 0.f) continue;
+            float mag = 0.2f + 0.5f * rng.uni();                 // 20..70 %
+            if (d == pitchIdx) mag *= 0.3f;                       // +-48 st range: keep it gentle
+            if (d == delayTimeIdx) mag *= 0.5f;
+            m.amt[s][d] = (rng.uni() < 0.75f ? 1.f : -1.f) * std::max (0.05f, mag);
+            ++placed;
         }
+    }
 }
 } // namespace gg

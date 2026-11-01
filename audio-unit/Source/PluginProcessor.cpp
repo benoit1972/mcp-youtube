@@ -87,25 +87,32 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
     l.add (std::make_unique<F> (pid ("driftLength"), "Drift Length",  Range (0.25f, 6.f, 0.01f, 0.5f), 1.5f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (x, 2) + " steps"; })));
 
-    // 8 macros (automatable: these are the 8 knobs to map in a Live rack) and 3 assignment slots each
-    juce::StringArray destNames { "None" };
-    for (const auto& d : gg::kModDests) destNames.add (d.label);
+    // 8 macros: automatable, these are the knobs to map in a Live rack. Their targets live in the matrix.
     for (int m = 0; m < gg::kNumMacros; ++m)
-    {
-        l.add (std::make_unique<F> (juce::ParameterID { ("macro" + juce::String (m + 1)).toRawUTF8(), 1 }, "Macro " + juce::String (m + 1),
+        l.add (std::make_unique<F> (juce::ParameterID { juce::String ("macro") + juce::String (m + 1), 1 }, "Macro " + juce::String (m + 1),
                                     Range (0.f, 1.f, 0.001f), 0.f,
                                     juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
-        {
-            const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
-            const auto def = gg::defaultSlot (m, sl);
-            l.add (std::make_unique<C> (juce::ParameterID { (tag + "d").toRawUTF8(), 1 }, "Macro " + juce::String (m + 1) + " slot " + juce::String (sl + 1) + " target",
-                                        destNames, def.dest, juce::AudioParameterChoiceAttributes().withAutomatable (false)));
-            l.add (std::make_unique<F> (juce::ParameterID { (tag + "a").toRawUTF8(), 1 }, "Macro " + juce::String (m + 1) + " slot " + juce::String (sl + 1) + " amount",
-                                        Range (-1.f, 1.f, 0.01f), def.amount,
-                                        juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct).withAutomatable (false)));
-        }
+
+    // 2 LFOs
+    const juce::StringArray lfoSync { "Free", "1 bar", "1/2", "1/4", "1/8", "1/16" };
+    const juce::StringArray lfoShape { "Sine", "Triangle", "Saw", "Square", "Random" };
+    for (int i = 1; i <= 2; ++i)
+    {
+        const auto n = juce::String (i);
+        l.add (std::make_unique<F> (juce::ParameterID { "lfo" + n + "Rate", 1 }, "LFO " + n + " Rate", Range (0.02f, 20.f, 0.01f, 0.4f), 1.f,
+                                    juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (x, 2) + " Hz"; })));
+        l.add (std::make_unique<C> (juce::ParameterID { "lfo" + n + "Sync", 1 }, "LFO " + n + " Sync", lfoSync, 0));
+        l.add (std::make_unique<C> (juce::ParameterID { "lfo" + n + "Shape", 1 }, "LFO " + n + " Shape", lfoShape, 0));
     }
+    // euclidean sequencer
+    l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "seqSteps", 1 }, "Seq Steps", 1, 16, 8));
+    l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "seqHits", 1 }, "Seq Hits", 0, 16, 3));
+    l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { "seqRot", 1 }, "Seq Rotate", 0, 15, 0));
+    l.add (std::make_unique<C> (juce::ParameterID { "seqRate", 1 }, "Seq Rate", divisions, 2));
+    l.add (std::make_unique<F> (juce::ParameterID { "seqDecay", 1 }, "Seq Decay", Range (0.01f, 2.f, 0.01f, 0.5f), 0.25f,
+                                juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
+    l.add (std::make_unique<F> (juce::ParameterID { "seqRandom", 1 }, "Seq Random", Range (0.f, 1.f, 0.001f), 0.f,
+                                juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     return l;
 }
 
@@ -120,15 +127,24 @@ GlitchGrainProcessor::GlitchGrainProcessor()
         destRaw[(size_t) i] = apvts.getRawParameterValue (gg::kModDests[i].id);
     }
     for (int m = 0; m < gg::kNumMacros; ++m)
-    {
         macroRaw[(size_t) m] = apvts.getRawParameterValue ("macro" + juce::String (m + 1));
-        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
-        {
-            const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
-            slotDestRaw[m][sl] = apvts.getRawParameterValue (tag + "d");
-            slotAmtRaw[m][sl] = apvts.getRawParameterValue (tag + "a");
-        }
+    for (int i = 0; i < 2; ++i)
+    {
+        const auto n = juce::String (i + 1);
+        lfoRaw[i][0] = apvts.getRawParameterValue ("lfo" + n + "Rate");
+        lfoRaw[i][1] = apvts.getRawParameterValue ("lfo" + n + "Sync");
+        lfoRaw[i][2] = apvts.getRawParameterValue ("lfo" + n + "Shape");
     }
+    {
+        const char* ids[6] = { "seqSteps", "seqHits", "seqRot", "seqRate", "seqDecay", "seqRandom" };
+        for (int k = 0; k < 6; ++k) seqRaw[k] = apvts.getRawParameterValue (ids[k]);
+    }
+
+    const auto dm = gg::defaultMatrix();
+    for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
+        for (int d = 0; d < gg::kNumDests; ++d)
+            matrix[(size_t) (sIdx * gg::kNumDests + d)].store (dm.amt[sIdx][d]);
+    for (auto& v : sourceDisplay) v.store (0.f);
     publishSource (gg::SourceBuffer::makeDefault());
 }
 
@@ -151,6 +167,9 @@ void GlitchGrainProcessor::prepareToPlay (double sampleRate, int)
     fx.prepare (sampleRate);
     ambient.prepare (sampleRate);
     noteGen.prepare (sampleRate);
+    lfo[0].prepare (sampleRate, 0x1F123u);
+    lfo[1].prepare (sampleRate, 0x2B4C5u);
+    seq.prepare (sampleRate, 0x3D7E9u);
     lastHeard.fill (-1000000000000LL);
     sampleClock = 0;
     level.reset (sampleRate, 0.03);
@@ -201,16 +220,33 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     }
     if (audioSource == nullptr) return;
 
+    // host tempo first: the LFOs and the sequencer are tempo-aware
+    double hostBpm = 120.0;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto bpm = pos->getBpm())
+                hostBpm = *bpm;
+
+    // modulation sources -> matrix -> per-destination offsets (once per block)
     {
-        float macros[gg::kNumMacros];
-        gg::Slot slots[gg::kNumMacros][gg::kSlotsPerMacro];
-        for (int m = 0; m < gg::kNumMacros; ++m)
-        {
-            macros[m] = macroRaw[(size_t) m]->load();
-            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
-                slots[m][sl] = { (int) (slotDestRaw[m][sl]->load() + 0.5f), slotAmtRaw[m][sl]->load() };
-        }
-        gg::accumulate (macros, slots, modOffsets.data());
+        const int nBlock = buffer.getNumSamples();
+        float src[gg::kNumSources];
+        for (int m = 0; m < gg::kNumMacros; ++m) src[m] = macroRaw[(size_t) m]->load();
+        for (int i = 0; i < 2; ++i)
+            src[gg::kSrcLfo1 + i] = lfo[i].advance (nBlock, lfoRaw[i][0]->load(), (int) lfoRaw[i][1]->load(), hostBpm, (int) lfoRaw[i][2]->load());
+        gg::SeqParams sp;
+        sp.steps = (int) seqRaw[0]->load();   sp.hits = (int) seqRaw[1]->load();
+        sp.rotation = (int) seqRaw[2]->load(); sp.rateDiv = (int) seqRaw[3]->load();
+        sp.decaySec = seqRaw[4]->load();      sp.randomAmt = seqRaw[5]->load();
+        sp.bpm = hostBpm;
+        src[gg::kSrcSeq] = seq.advance (nBlock, sp);
+
+        gg::Matrix mat;
+        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
+            for (int d = 0; d < gg::kNumDests; ++d)
+                mat.amt[sIdx][d] = matrix[(size_t) (sIdx * gg::kNumDests + d)].load();
+        gg::accumulate (src, mat, modOffsets.data());
+        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx) sourceDisplay[(size_t) sIdx].store (src[sIdx]);
     }
 
     gg::GrainParams gp;
@@ -228,11 +264,7 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     fp.stutterPitch = param ("stutterPitch");
     fp.glitchAmount = param ("glitch");
     fp.glitchDiv = (int) param ("glitchRate");
-    fp.bpm = 120.0;
-    if (auto* ph = getPlayHead())
-        if (auto pos = ph->getPosition())
-            if (auto bpm = pos->getBpm())
-                fp.bpm = *bpm;
+    fp.bpm = hostBpm;
 
     gg::AmbientParams ap;
     ap.tape = param ("tape");
@@ -392,18 +424,18 @@ void GlitchGrainProcessor::randomise (RandomScope scope)
     if (scope == RandomScope::Play  || scope == RandomScope::AllSound) randomList (play, std::size (play));
     if (scope == RandomScope::Fx    || scope == RandomScope::AllSound) randomList (fx, std::size (fx));
 
-    if (scope == RandomScope::Macros)
+    if (scope == RandomScope::Mod)
     {
+        // macros get random targets in the matrix (LFO / sequencer columns are kept) and random values
+        gg::Matrix mat;
+        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
+            for (int d = 0; d < gg::kNumDests; ++d) mat.amt[sIdx][d] = getMatrix (sIdx, d);
         gg::Rng grng ((uint32_t) rng.nextInt() | 1u);
-        gg::Slot slots[gg::kNumMacros][gg::kSlotsPerMacro];
-        gg::randomAssign (grng, slots);
+        gg::randomAssignMacros (grng, mat);
+        for (int sIdx = 0; sIdx < gg::kNumMacros; ++sIdx)
+            for (int d = 0; d < gg::kNumDests; ++d) setMatrix (sIdx, d, mat.amt[sIdx][d]);
         for (int m = 0; m < gg::kNumMacros; ++m)
-            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
-            {
-                const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
-                if (auto* pd = apvts.getParameter (tag + "d")) setNormalised (tag + "d", pd->convertTo0to1 ((float) slots[m][sl].dest));
-                if (auto* pa = apvts.getParameter (tag + "a")) setNormalised (tag + "a", pa->convertTo0to1 (slots[m][sl].amount));
-            }
+            setNormalised ("macro" + juce::String (m + 1), 0.1f + 0.8f * rng.nextFloat());
     }
 }
 
@@ -411,6 +443,7 @@ juce::AudioProcessorEditor* GlitchGrainProcessor::createEditor() { return new Po
 
 void GlitchGrainProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
+    apvts.state.setProperty ("matrix", serialiseMatrix(), nullptr);
     if (auto xml = apvts.copyState().createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -421,6 +454,7 @@ void GlitchGrainProcessor::setStateInformation (const void* data, int size)
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            restoreMatrix (apvts.state.getProperty ("matrix").toString());
             const auto path = apvts.state.getProperty ("samplePath").toString();
             if (path.isNotEmpty())
             {
@@ -428,6 +462,26 @@ void GlitchGrainProcessor::setStateInformation (const void* data, int size)
                 if (f.existsAsFile()) loadSample (f);
             }
         }
+}
+
+juce::String GlitchGrainProcessor::serialiseMatrix() const
+{
+    juce::StringArray parts;
+    for (int i = 0; i < gg::kNumSources * gg::kNumDests; ++i)
+        parts.add (juce::String (matrix[(size_t) i].load(), 3));
+    return parts.joinIntoString (" ");
+}
+
+void GlitchGrainProcessor::restoreMatrix (const juce::String& text)
+{
+    if (text.isEmpty()) return; // old state: keep the defaults
+    juce::StringArray parts;
+    parts.addTokens (text, " ", "");
+    parts.removeEmptyStrings();
+    if (parts.size() != gg::kNumSources * gg::kNumDests) return;
+    for (int i = 0; i < parts.size(); ++i)
+        matrix[(size_t) i].store (juce::jlimit (-1.f, 1.f, parts[i].getFloatValue()));
+    ++matrixVersion;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new GlitchGrainProcessor(); }

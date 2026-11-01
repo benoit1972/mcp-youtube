@@ -4,13 +4,16 @@ Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant 
 
 ## Interface
 
-Quatre pages (onglets **Grain / Play / FX / Macros**) pour garder l'écran d'accueil léger. Tout démarre « à zéro » : effets, stutter, glitch, Drift et macros sont désactivés, on sculpte d'abord le son (Grain, Play) puis on ajoute les effets :
-- **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains.
+Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d'accueil léger. Tout démarre « à zéro » : effets, stutter, glitch, Drift et modulations de LFO/séquenceur sont désactivés, on sculpte d'abord le son (Grain, Play) puis on ajoute les effets :
+- **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains. Glisse un fichier audio dessus pour le charger.
 - **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.
-- **Macros** : 8 macros, chacune affectable à 3 paramètres (cible + quantité de -100 % à +100 %). Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. Les affectations par défaut sont des thèmes musicaux (texture, nuage, hauteur, espace, écho, grain, enveloppe, mouvement).
+- **Mod** : les sources de modulation. 8 **macros** (les 8 potards à mapper dans Live), 2 **LFO** (sinus, triangle, dent de scie, carré, aléatoire ; libres en Hz ou synchronisés au tempo) et un **séquenceur euclidien** (1-16 pas, nombre de coups, rotation, vitesse, déclin, hasard) dont le motif s'affiche.
+- **Matrix** : la matrice de modulation. Lignes = tous les paramètres modulables, colonnes = les 11 sources (M1-M8, LFO1, LFO2, SEQ). Glisse une case vers le haut/bas pour régler la quantité (de -100 % à +100 % ; Maj = précis), double-clic = effacer, molette = défiler. Orange = positif, bleu = négatif. N'importe quelle source peut piloter n'importe quel paramètre, et plusieurs sources peuvent s'additionner sur un même paramètre.
 
-Bouton **Random** : agit sur la **page affichée** (Grain, Play, FX, ou l'affectation des macros), **Maj + clic** = toutes les pages sonores. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés dans des plages musicales.
+Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. Les macros ont des affectations par défaut (texture, nuage, hauteur, espace, écho, grain, enveloppe, mouvement) que tu peux changer dans la Matrix. Les modulations sont calculées une fois par bloc audio.
+
+Bouton **Random** : agit sur la **page affichée** : Grain, Play ou FX = ces réglages ; Mod ou Matrix = donne aux 8 macros **des cibles aléatoires** dans la matrice (2 à 4 paramètres chacune) **et des valeurs aléatoires** (les colonnes LFO et séquenceur sont conservées) ; **Maj + clic** = Grain + Play + FX. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés dans des plages musicales.
 **Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement

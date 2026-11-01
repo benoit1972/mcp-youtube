@@ -5,6 +5,7 @@
 #include "Dsp/GlitchFx.h"
 #include "Dsp/GranularEngine.h"
 #include "Dsp/ModMatrix.h"
+#include "Dsp/Modulators.h"
 #include "Dsp/NoteGen.h"
 
 class GlitchGrainProcessor : public juce::AudioProcessor
@@ -42,10 +43,21 @@ public:
 
     // Message thread: randomise one section within musically useful ranges.
     //   Grain / Play / Fx: that section's knobs (never Level, never Drift)
-    //   Macros: assigns the 24 macro slots musically (macro values are left alone)
+    //   Mod: gives the 8 macros random targets in the matrix AND random values
     //   AllSound: Grain + Play + Fx
-    enum class RandomScope { Grain, Play, Fx, Macros, AllSound };
+    enum class RandomScope { Grain, Play, Fx, Mod, AllSound };
     void randomise (RandomScope scope);
+
+    // Modulation matrix (source x destination amount, -1..1). Thread-safe, edited from the UI.
+    float getMatrix (int src, int dest) const { return matrix[(size_t) (src * gg::kNumDests + dest)].load(); }
+    void setMatrix (int src, int dest, float v)
+    {
+        matrix[(size_t) (src * gg::kNumDests + dest)].store (juce::jlimit (-1.f, 1.f, v));
+        ++matrixVersion;
+    }
+    int getMatrixVersion() const { return matrixVersion.load(); }
+    float getSourceValue (int src) const { return sourceDisplay[(size_t) src].load(); } // for the UI meters
+    int getSeqStep() const { return seq.currentStep(); }
     // Peak profile (0..1, 320 values) of the current sample, for the waveform display.
     std::vector<float> getPeaks() const;
 
@@ -66,13 +78,20 @@ private:
 
     struct Ev { int offset; int kind; int note; float vel; }; // kind: 0 on, 1 off, 2 all off
     std::vector<Ev> events;
-    // macro modulation: pointers cached once, offsets recomputed every block (audio thread)
+    // modulation: pointers cached once, offsets recomputed every block (audio thread)
     std::array<std::atomic<float>*, gg::kNumMacros> macroRaw {};
-    std::atomic<float>* slotDestRaw[gg::kNumMacros][gg::kSlotsPerMacro] {};
-    std::atomic<float>* slotAmtRaw[gg::kNumMacros][gg::kSlotsPerMacro] {};
+    std::atomic<float>* lfoRaw[2][3] {};   // rate, sync, shape
+    std::atomic<float>* seqRaw[6] {};      // steps, hits, rot, rate, decay, random
+    std::array<std::atomic<float>, (size_t) (gg::kNumSources * gg::kNumDests)> matrix {};
+    std::atomic<int> matrixVersion { 0 };
+    std::array<std::atomic<float>, gg::kNumSources> sourceDisplay {};
     std::array<juce::RangedAudioParameter*, gg::kNumDests> destParam {};
     std::array<std::atomic<float>*, gg::kNumDests> destRaw {};
     mutable std::array<float, gg::kNumDests> modOffsets {};
+    gg::Lfo lfo[2];
+    gg::EuclidSeq seq;
+    juce::String serialiseMatrix() const;
+    void restoreMatrix (const juce::String&);
 
     juce::SmoothedValue<float> level;
     double currentSampleRate = 48000.0;
