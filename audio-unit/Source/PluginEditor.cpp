@@ -1,5 +1,10 @@
 #include "PluginEditor.h"
 
+namespace
+{
+constexpr int kMargin = 16, kColWidth = 480, kColGap = 8, kRowHeight = 116, kRowsTop = 76, kKnobBlock = 96;
+}
+
 GlitchGrainEditor::Knob& GlitchGrainEditor::addKnob (const char* paramId, const char* text)
 {
     auto* k = knobs.add (new Knob());
@@ -12,17 +17,31 @@ GlitchGrainEditor::Knob& GlitchGrainEditor::addKnob (const char* paramId, const 
     return *k;
 }
 
+void GlitchGrainEditor::addSection (const char* title, int column, int row,
+                                    std::initializer_list<std::pair<const char*, const char*>> params)
+{
+    Section s { title, column, row, {} };
+    for (const auto& pr : params)
+        s.knobs.add (&addKnob (pr.first, pr.second));
+    sections.push_back (std::move (s));
+}
+
 GlitchGrainEditor::GlitchGrainEditor (GlitchGrainProcessor& p)
     : AudioProcessorEditor (&p), processor (p)
 {
-    rowGrains.add (&addKnob ("position", "Position"), &addKnob ("spray", "Spray"), &addKnob ("size", "Grain Size"),
-                   &addKnob ("density", "Density"), &addKnob ("shape", "Window"));
-    rowPitch.add (&addKnob ("pitch", "Pitch"), &addKnob ("pitchSpray", "Pitch Spray"), &addKnob ("reverse", "Reverse"),
-                  &addKnob ("pan", "Stereo"), &addKnob ("level", "Level"));
-    rowEnv.add (&addKnob ("attack", "Attack"), &addKnob ("decay", "Decay"),
-                &addKnob ("sustain", "Sustain"), &addKnob ("release", "Release"));
-    rowFx.add (&addKnob ("stutter", "Stutter"), &addKnob ("stutterRate", "Stutter Rate"), &addKnob ("stutterPitch", "Stutter Pitch"),
-               &addKnob ("glitch", "Glitch"), &addKnob ("glitchRate", "Glitch Rate"));
+    // left column: the instrument
+    addSection ("GRAINS", 0, 0, { { "position", "Position" }, { "spray", "Spray" }, { "size", "Grain Size" },
+                                  { "density", "Density" }, { "shape", "Window" } });
+    addSection ("PITCH / STEREO", 0, 1, { { "pitch", "Pitch" }, { "pitchSpray", "Pitch Spray" }, { "reverse", "Reverse" },
+                                          { "pan", "Stereo" }, { "level", "Level" } });
+    addSection ("ENVELOPE", 0, 2, { { "attack", "Attack" }, { "decay", "Decay" }, { "sustain", "Sustain" }, { "release", "Release" } });
+    addSection ("DRIFT  (generative notes)", 0, 3, { { "drift", "Drift" }, { "driftRate", "Rate" }, { "driftScale", "Scale" },
+                                                     { "driftRoot", "Root" }, { "driftLength", "Length" } });
+    // right column: effects
+    addSection ("STUTTER  &  GLITCH", 1, 0, { { "stutter", "Stutter" }, { "stutterRate", "Stutter Rate" }, { "stutterPitch", "Stutter Pitch" },
+                                              { "glitch", "Glitch" }, { "glitchRate", "Glitch Rate" } });
+    addSection ("TAPE  &  DELAY", 1, 1, { { "tape", "Tape" }, { "delayTime", "Time" }, { "delayFb", "Feedback" }, { "delayMix", "Mix" } });
+    addSection ("REVERB  &  SHIMMER", 1, 2, { { "reverbSize", "Size" }, { "reverbDamp", "Damping" }, { "reverbMix", "Mix" }, { "shimmer", "Shimmer" } });
 
     sampleLabel.setText (processor.getSampleName(), juce::dontSendNotification);
     sampleLabel.setJustificationType (juce::Justification::centredLeft);
@@ -44,7 +63,7 @@ GlitchGrainEditor::GlitchGrainEditor (GlitchGrainProcessor& p)
                               });
     };
 
-    setSize (640, 560);
+    setSize (2 * kMargin + 2 * kColWidth + kColGap, kRowsTop + 4 * kRowHeight + 8);
 }
 
 void GlitchGrainEditor::paint (juce::Graphics& g)
@@ -52,33 +71,27 @@ void GlitchGrainEditor::paint (juce::Graphics& g)
     g.fillAll (juce::Colour (0xff15161a));
     g.setColour (juce::Colour (0xffe8e8ea));
     g.setFont (juce::FontOptions (22.f, juce::Font::bold));
-    g.drawText ("GLITCH GRAIN", 16, 10, 300, 30, juce::Justification::centredLeft);
+    g.drawText ("GLITCH GRAIN", kMargin, 10, 300, 30, juce::Justification::centredLeft);
 
     g.setFont (juce::FontOptions (12.f, juce::Font::bold));
     g.setColour (juce::Colour (0xff6ec6ff));
-    const char* titles[] = { "GRAINS", "PITCH / STEREO", "ENVELOPE", "STUTTER  &  GLITCH" };
-    for (int i = 0; i < 4; ++i)
-        g.drawText (titles[i], 16, 92 + i * 116, 300, 16, juce::Justification::centredLeft);
+    for (const auto& s : sections)
+        g.drawText (s.title, kMargin + s.column * (kColWidth + kColGap), kRowsTop - 16 + s.row * kRowHeight,
+                    kColWidth, 16, juce::Justification::centredLeft);
 }
 
 void GlitchGrainEditor::resized()
 {
-    auto top = getLocalBounds().reduced (16, 0).removeFromTop (60).withTrimmedTop (36);
-    loadButton.setBounds (top.removeFromRight (130).reduced (0, 2));
-    sampleLabel.setBounds (top.reduced (4, 0));
+    auto top = juce::Rectangle<int> (getWidth() - 2 * kMargin, 28).withPosition (kMargin, 12);
+    loadButton.setBounds (top.removeFromRight (130));
+    sampleLabel.setBounds (top.removeFromRight (kColWidth).reduced (4, 0));
 
-    auto layoutRow = [this] (const juce::Array<Knob*>& row, int y)
-    {
-        const int w = (getWidth() - 32) / 5;
-        for (int i = 0; i < row.size(); ++i)
+    for (const auto& s : sections)
+        for (int i = 0; i < s.knobs.size(); ++i)
         {
-            juce::Rectangle<int> r (16 + i * w, y, w, 96);
-            row[i]->label.setBounds (r.removeFromTop (14));
-            row[i]->slider.setBounds (r);
+            juce::Rectangle<int> r (kMargin + s.column * (kColWidth + kColGap) + i * (kColWidth / 5),
+                                    kRowsTop + s.row * kRowHeight, kColWidth / 5, kKnobBlock);
+            s.knobs[i]->label.setBounds (r.removeFromTop (14));
+            s.knobs[i]->slider.setBounds (r);
         }
-    };
-    layoutRow (rowGrains, 108);
-    layoutRow (rowPitch, 224);
-    layoutRow (rowEnv, 340);
-    layoutRow (rowFx, 456);
 }

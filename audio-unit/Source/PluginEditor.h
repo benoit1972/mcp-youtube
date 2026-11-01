@@ -16,16 +16,23 @@ private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
 
+    struct Section
+    {
+        juce::String title;
+        int column, row;
+        juce::Array<Knob*> knobs;
+    };
+
     Knob& addKnob (const char* paramId, const char* text);
+    void addSection (const char* title, int column, int row,
+                     std::initializer_list<std::pair<const char*, const char*>> params);
 
     GlitchGrainProcessor& processor;
     juce::OwnedArray<Knob> knobs;
+    std::vector<Section> sections;
     juce::TextButton loadButton { "Load sample..." };
     juce::Label sampleLabel;
     std::unique_ptr<juce::FileChooser> chooser;
-
-    // rows of knobs
-    juce::Array<Knob*> rowGrains, rowPitch, rowEnv, rowFx;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GlitchGrainEditor)
 };

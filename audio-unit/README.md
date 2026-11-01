@@ -1,4 +1,4 @@
-# Glitch Grain — synthé granulaire AU avec glitch & stutter
+# Glitch Grain — synthé granulaire ambient AU (glitch, stutter, tape, shimmer, notes génératives)
 
 Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant du serveur MCP YouTube du reste du dépôt.
 
@@ -24,6 +24,22 @@ capturées et bouclées jusqu'au temps suivant. *Stutter Pitch* change la vitess
 coupure (dropout), bit/rate crusher, lecture inversée de ce qui vient d'être joué, micro-boucle (buzz).
 
 Les horloges suivent le tempo de l'hôte (120 BPM par défaut) mais ne sont **pas** calées sur la position de lecture.
+
+**Tape** : wow/flutter/dérive, saturation douce, adoucissement des aigus et léger souffle.
+
+**Delay** : ping-pong stéréo (10–1500 ms), feedback assombri.
+
+**Reverb & Shimmer** : réverbération à peignes/allpass ; *Shimmer* renvoie la queue de réverb une octave plus haut dans la réverb
+(le gain de la boucle est automatiquement réduit quand la réverb est longue, pour rester stable).
+
+**Drift** (notes génératives) : à chaque pas (1 mesure … 1/16, selon le tempo), avec une probabilité *Drift*, une marche aléatoire
+dans la gamme choisie (majeure, mineure, pentatonique, dorien, lydien, tons entiers ; tonique au choix ; 3 octaves) joue une note
+dans le synthé. Fonctionne sans MIDI ; le jeu MIDI se mélange aux notes générées.
+
+> Instrument original. Il est *inspiré par la liste de fonctions* de GrainBrick (TrimUI Brick, code source fermé) mais n'en reprend
+> ni code ni nom ; le moteur de notes, les effets et l'interface sont écrits ici de zéro.
+
+Chaîne audio : synthé granulaire → stutter/glitch → tape → delay → reverb/shimmer → niveau + limiteur `tanh`.
 
 ## Compilation (macOS + Xcode + CMake)
 

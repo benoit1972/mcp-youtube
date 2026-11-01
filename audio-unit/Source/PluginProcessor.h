@@ -1,7 +1,9 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "Dsp/AmbientFx.h"
 #include "Dsp/GlitchFx.h"
 #include "Dsp/GranularEngine.h"
+#include "Dsp/NoteGen.h"
 
 class GlitchGrainProcessor : public juce::AudioProcessor
 {
@@ -45,6 +47,11 @@ private:
 
     gg::GranularEngine engine;
     gg::GlitchFx fx;
+    gg::AmbientFx ambient;
+    gg::NoteGen noteGen;
+
+    struct Ev { int offset; int kind; int note; float vel; }; // kind: 0 on, 1 off, 2 all off
+    std::vector<Ev> events;
     juce::SmoothedValue<float> level;
     double currentSampleRate = 48000.0;
 

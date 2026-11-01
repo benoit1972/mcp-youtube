@@ -44,7 +44,9 @@ target_sources(GlitchGrain PRIVATE
   Source/PluginEditor.h
   Source/Dsp/Rng.h
   Source/Dsp/GranularEngine.h
-  Source/Dsp/GlitchFx.h)
+  Source/Dsp/GlitchFx.h
+  Source/Dsp/AmbientFx.h
+  Source/Dsp/NoteGen.h)
 
 target_compile_definitions(GlitchGrain PUBLIC
   JUCE_WEB_BROWSER=0
