@@ -34,6 +34,66 @@ public:
         setColour (juce::TextEditor::textColourId, look::text);
         setColour (juce::TextEditor::outlineColourId, look::accent);
         setColour (juce::CaretComponent::caretColourId, look::accent);
+        setColour (juce::ComboBox::backgroundColourId, look::panel);
+        setColour (juce::ComboBox::textColourId, look::text);
+        setColour (juce::ComboBox::outlineColourId, look::line);
+        setColour (juce::ComboBox::arrowColourId, look::dim);
+        setColour (juce::PopupMenu::backgroundColourId, look::panel);
+        setColour (juce::PopupMenu::textColourId, look::text);
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, look::accent);
+        setColour (juce::PopupMenu::highlightedTextColourId, juce::Colour (0xff1a0d09));
+        setColour (juce::BubbleComponent::backgroundColourId, look::panel);
+        setColour (juce::BubbleComponent::outlineColourId, look::accent);
+        setColour (juce::TooltipWindow::textColourId, look::text);
+    }
+
+    // thin bipolar bar used for the macro amounts
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float, float, float,
+                           juce::Slider::SliderStyle, juce::Slider& s) override
+    {
+        const float x0 = (float) x + 5.f, x1 = (float) (x + w) - 5.f, cy = (float) y + (float) h * 0.5f;
+        const float zero = x0 + (x1 - x0) * (float) s.valueToProportionOfLength (std::max (0.0, s.getMinimum()));
+        const float pos = x0 + (x1 - x0) * (float) s.valueToProportionOfLength (s.getValue());
+        const bool hot = s.isMouseOverOrDragging();
+
+        g.setColour (look::track);
+        g.fillRoundedRectangle (x0, cy - 1.5f, x1 - x0, 3.f, 1.5f);
+        if (s.getMinimum() < 0.0)
+        {
+            g.setColour (look::lineHi);
+            g.fillRect (zero - 0.5f, cy - 4.f, 1.f, 8.f);
+        }
+        if (std::abs (pos - zero) > 0.5f)
+        {
+            g.setColour (hot ? look::accentHi : look::accent);
+            g.fillRoundedRectangle (std::min (zero, pos), cy - 1.5f, std::abs (pos - zero), 3.f, 1.5f);
+        }
+        g.setColour (look::text);
+        g.fillEllipse (pos - 4.f, cy - 4.f, 8.f, 8.f);
+    }
+
+    juce::Font getComboBoxFont (juce::ComboBox&) override { return juce::Font (juce::FontOptions (11.5f)); }
+
+    void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+    {
+        label.setBounds (6, 1, box.getWidth() - 20, box.getHeight() - 2);
+        label.setFont (getComboBoxFont (box));
+    }
+
+    void drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box) override
+    {
+        auto r = juce::Rectangle<float> (0.f, 0.f, (float) w, (float) h).reduced (0.5f);
+        g.setColour (look::panel);
+        g.fillRoundedRectangle (r, 5.f);
+        g.setColour (box.isMouseOver() ? look::lineHi : look::line);
+        g.drawRoundedRectangle (r, 5.f, 1.f);
+        juce::Path chevron;
+        const float cx = (float) w - 10.f, cy = (float) h * 0.5f;
+        chevron.startNewSubPath (cx - 3.f, cy - 1.5f);
+        chevron.lineTo (cx, cy + 1.5f);
+        chevron.lineTo (cx + 3.f, cy - 1.5f);
+        g.setColour (look::dim);
+        g.strokePath (chevron, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos,

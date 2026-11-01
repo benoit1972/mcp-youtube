@@ -184,8 +184,10 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
 
     addChildComponent (waveform);
 
-    const char* tabNames[] = { "Grain", "Play", "FX" };
-    for (int i = 0; i < 3; ++i)
+    buildMacroPage();
+
+    const char* tabNames[] = { "Grain", "Play", "FX", "Macros" };
+    for (int i = 0; i < 4; ++i)
     {
         auto& b = tabButtons[i];
         b.setButtonText (tabNames[i]);
@@ -200,10 +202,53 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
     randomButton.setComponentID ("pillAccent");
     addAndMakeVisible (randomButton);
 
-    randomButton.onClick = [this] { proc.randomise(); };
+    // Random acts on the page you are on (so you can sculpt one section at a time); Shift = all sound sections.
+    randomButton.onClick = [this]
+    {
+        using S = GlitchGrainProcessor::RandomScope;
+        const bool all = juce::ModifierKeys::currentModifiers.isShiftDown();
+        proc.randomise (all ? S::AllSound : currentPage == 0 ? S::Grain : currentPage == 1 ? S::Play
+                                          : currentPage == 2 ? S::Fx : S::Macros);
+    };
 
     setSize (kWidth, kHeight);
     showPage (0);
+}
+
+void PoomseGlitchEditor::buildMacroPage()
+{
+    juce::StringArray destNames { "None" };
+    for (const auto& d : gg::kModDests) destNames.add (d.label);
+
+    for (int m = 0; m < gg::kNumMacros; ++m)
+    {
+        auto col = std::make_unique<MacroColumn>();
+        auto& k = col->knob;
+        k.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 18);
+        k.slider.setRotaryParameters (juce::MathConstants<float>::pi * 1.25f, juce::MathConstants<float>::pi * 2.75f, true);
+        k.name.setText ("MACRO " + juce::String (m + 1), juce::dontSendNotification);
+        k.name.setJustificationType (juce::Justification::centred);
+        k.name.setFont (look::caps (10.5f));
+        k.name.setColour (juce::Label::textColourId, look::dim);
+        k.name.setInterceptsMouseClicks (false, false);
+        k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, "macro" + juce::String (m + 1), k.slider);
+        addChildComponent (k.slider);
+        addChildComponent (k.name);
+
+        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+        {
+            const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
+            col->target[sl].addItemList (destNames, 1);
+            col->targetAtt[sl] = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, tag + "d", col->target[sl]);
+            col->amount[sl].setSliderStyle (juce::Slider::LinearHorizontal);
+            col->amount[sl].setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+            col->amount[sl].setPopupDisplayEnabled (true, true, this);
+            col->amountAtt[sl] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, tag + "a", col->amount[sl]);
+            addChildComponent (col->target[sl]);
+            addChildComponent (col->amount[sl]);
+        }
+        macroCols[(size_t) m] = std::move (col);
+    }
 }
 
 PoomseGlitchEditor::~PoomseGlitchEditor() { setLookAndFeel (nullptr); }
@@ -217,7 +262,13 @@ void PoomseGlitchEditor::showPage (int index)
         for (auto& row : pages[pi].rows)
             for (auto* k : row.knobs) { k->slider.setVisible (on); k->name.setVisible (on); }
     }
-    waveform.setVisible (pages[(size_t) index].waveform);
+    waveform.setVisible (index < 3 && pages[(size_t) index].waveform);
+    for (auto& col : macroCols)
+    {
+        col->knob.slider.setVisible (index == 3);
+        col->knob.name.setVisible (index == 3);
+        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl) { col->target[sl].setVisible (index == 3); col->amount[sl].setVisible (index == 3); }
+    }
     repaint();
 }
 
@@ -237,10 +288,29 @@ void PoomseGlitchEditor::paint (juce::Graphics& g)
     g.setColour (look::line);
     g.fillRect (kPad, 100, getWidth() - 2 * kPad, 1);
 
+    g.setFont (look::caps (9.5f, true, 0.12f));
+    g.setColour (look::dim);
+    g.drawText ("RANDOM = THIS PAGE   -   SHIFT = ALL", getWidth() - kPad - 260, 50, 260, 12, juce::Justification::centredRight, false);
+
     // section titles of the current page
     g.setFont (look::caps (10.5f, true, 0.2f));
-    for (const auto& row : pages[(size_t) currentPage].rows)
+    if (currentPage == 3)
     {
+        const juce::String t = "ASSIGN EACH MACRO TO UP TO 3 PARAMETERS";
+        g.setColour (look::dim);
+        g.drawText (t, macroTitleBounds, juce::Justification::centredLeft, false);
+        const int tw = (int) look::caps (10.5f, true, 0.2f).getStringWidthFloat (t) + 12;
+        g.setColour (look::line);
+        g.fillRect (macroTitleBounds.getX() + tw, macroTitleBounds.getCentreY(), macroTitleBounds.getWidth() - tw, 1);
+        g.setFont (juce::Font (juce::FontOptions (11.5f)));
+        g.setColour (look::dim);
+        g.drawFittedText ("In Ableton: put Poomse Glitch in an Instrument Rack, click Configure, then move Macro 1-8 and map each to a Rack knob. "
+                          "Bar = amount (centre = 0, left = reverse direction).",
+                          macroHintBounds, juce::Justification::topLeft, 2);
+    }
+    for (const auto& row : pages[(size_t) std::min (currentPage, 2)].rows)
+    {
+        if (currentPage == 3) break;
         if (row.title.isEmpty()) continue;
         const auto t = row.title.toUpperCase();
         g.setColour (look::dim);
@@ -254,11 +324,33 @@ void PoomseGlitchEditor::paint (juce::Graphics& g)
 void PoomseGlitchEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         tabButtons[i].setBounds (kPad + i * 88, 66, 80, 30);
 
     const int contentW = getWidth() - 2 * kPad;
     const int cellW = contentW / 5;
+
+    // macros page
+    {
+        const int colW = contentW / gg::kNumMacros;
+        int y = kContentTop;
+        macroTitleBounds = { kPad, y, contentW, kTitleHeight };
+        y += kTitleHeight;
+        const int slotsY = y + 96 + 8;
+        for (int m = 0; m < gg::kNumMacros; ++m)
+        {
+            auto& col = *macroCols[(size_t) m];
+            juce::Rectangle<int> cell (kPad + m * colW, y, colW, 96);
+            col.knob.name.setBounds (cell.removeFromTop (kNameHeight));
+            col.knob.slider.setBounds (cell);
+            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+            {
+                col.target[sl].setBounds (kPad + m * colW + 3, slotsY + sl * 46, colW - 6, 22);
+                col.amount[sl].setBounds (kPad + m * colW + 1, slotsY + sl * 46 + 24, colW - 2, 16);
+            }
+        }
+        macroHintBounds = { kPad, slotsY + gg::kSlotsPerMacro * 46 + 8, contentW, 34 };
+    }
 
     for (auto& page : pages)
     {

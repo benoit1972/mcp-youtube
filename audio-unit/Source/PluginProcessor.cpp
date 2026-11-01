@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cstring>
 
 using Range = juce::NormalisableRange<float>;
 
@@ -73,7 +74,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<F> (pid ("reverbDamp"), "Reverb Damping", Range (0.f, 1.f, 0.001f), 0.4f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
-    l.add (std::make_unique<F> (pid ("reverbMix"),  "Reverb Mix",     Range (0.f, 1.f, 0.001f), 0.2f,
+    l.add (std::make_unique<F> (pid ("reverbMix"),  "Reverb Mix",     Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
     l.add (std::make_unique<F> (pid ("shimmer"),    "Shimmer",        Range (0.f, 1.f, 0.001f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
@@ -85,6 +86,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
     l.add (std::make_unique<C> (pid ("driftRoot"),  "Drift Root",     juce::StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
     l.add (std::make_unique<F> (pid ("driftLength"), "Drift Length",  Range (0.25f, 6.f, 0.01f, 0.5f), 1.5f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) { return juce::String (x, 2) + " steps"; })));
+
+    // 8 macros (automatable: these are the 8 knobs to map in a Live rack) and 3 assignment slots each
+    juce::StringArray destNames { "None" };
+    for (const auto& d : gg::kModDests) destNames.add (d.label);
+    for (int m = 0; m < gg::kNumMacros; ++m)
+    {
+        l.add (std::make_unique<F> (juce::ParameterID { ("macro" + juce::String (m + 1)).toRawUTF8(), 1 }, "Macro " + juce::String (m + 1),
+                                    Range (0.f, 1.f, 0.001f), 0.f,
+                                    juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct)));
+        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+        {
+            const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
+            const auto def = gg::defaultSlot (m, sl);
+            l.add (std::make_unique<C> (juce::ParameterID { (tag + "d").toRawUTF8(), 1 }, "Macro " + juce::String (m + 1) + " slot " + juce::String (sl + 1) + " target",
+                                        destNames, def.dest, juce::AudioParameterChoiceAttributes().withAutomatable (false)));
+            l.add (std::make_unique<F> (juce::ParameterID { (tag + "a").toRawUTF8(), 1 }, "Macro " + juce::String (m + 1) + " slot " + juce::String (sl + 1) + " amount",
+                                        Range (-1.f, 1.f, 0.01f), def.amount,
+                                        juce::AudioParameterFloatAttributes().withStringFromValueFunction (pct).withAutomatable (false)));
+        }
+    }
     return l;
 }
 
@@ -93,7 +114,34 @@ GlitchGrainProcessor::GlitchGrainProcessor()
       apvts (*this, nullptr, "PARAMS", createLayout())
 {
     events.reserve (1024);
+    for (int i = 0; i < gg::kNumDests; ++i)
+    {
+        destParam[(size_t) i] = apvts.getParameter (gg::kModDests[i].id);
+        destRaw[(size_t) i] = apvts.getRawParameterValue (gg::kModDests[i].id);
+    }
+    for (int m = 0; m < gg::kNumMacros; ++m)
+    {
+        macroRaw[(size_t) m] = apvts.getRawParameterValue ("macro" + juce::String (m + 1));
+        for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+        {
+            const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
+            slotDestRaw[m][sl] = apvts.getRawParameterValue (tag + "d");
+            slotAmtRaw[m][sl] = apvts.getRawParameterValue (tag + "a");
+        }
+    }
     publishSource (gg::SourceBuffer::makeDefault());
+}
+
+float GlitchGrainProcessor::param (const char* id) const
+{
+    const int d = gg::destIndexOf (id);
+    if (d == 0) return apvts.getRawParameterValue (id)->load();
+
+    const float raw = destRaw[(size_t) (d - 1)]->load();
+    const float off = modOffsets[(size_t) (d - 1)];
+    if (off == 0.f) return raw;
+    auto* p = destParam[(size_t) (d - 1)];
+    return p->convertFrom0to1 (juce::jlimit (0.f, 1.f, p->convertTo0to1 (raw) + off));
 }
 
 void GlitchGrainProcessor::prepareToPlay (double sampleRate, int)
@@ -152,6 +200,18 @@ void GlitchGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         if (lock.isLocked() && source != audioSource) audioSource = source;
     }
     if (audioSource == nullptr) return;
+
+    {
+        float macros[gg::kNumMacros];
+        gg::Slot slots[gg::kNumMacros][gg::kSlotsPerMacro];
+        for (int m = 0; m < gg::kNumMacros; ++m)
+        {
+            macros[m] = macroRaw[(size_t) m]->load();
+            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+                slots[m][sl] = { (int) (slotDestRaw[m][sl]->load() + 0.5f), slotAmtRaw[m][sl]->load() };
+        }
+        gg::accumulate (macros, slots, modOffsets.data());
+    }
 
     gg::GrainParams gp;
     gp.position = param ("position");   gp.spray = param ("spray");
@@ -288,7 +348,7 @@ std::vector<float> GlitchGrainProcessor::getPeaks() const
     return peaks;
 }
 
-void GlitchGrainProcessor::randomise()
+void GlitchGrainProcessor::randomise (RandomScope scope)
 {
     // Normalised (0..1) ranges that keep the result playable; anything not listed is fully random.
     struct R { const char* id; float lo, hi; };
@@ -301,21 +361,49 @@ void GlitchGrainProcessor::randomise()
         { "tape", 0.f, 0.7f },      { "delayFb", 0.f, 0.6f },     { "delayMix", 0.f, 0.45f },
         { "reverbSize", 0.2f, 0.8f }, { "reverbMix", 0.05f, 0.45f }, { "shimmer", 0.f, 0.5f },
     };
+    static const char* const grain[] = { "position", "spray", "size", "density", "shape", "pitch", "pitchSpray", "reverse", "pan" };
+    static const char* const play[] = { "attack", "decay", "sustain", "release" };
+    static const char* const fx[] = { "stutter", "stutterRate", "stutterPitch", "glitch", "glitchRate", "tape", "delayTime",
+                                      "delayFb", "delayMix", "reverbSize", "reverbDamp", "reverbMix", "shimmer" };
 
     juce::Random rng;
-    for (auto* p : getParameters())
+    auto setNormalised = [this] (const juce::String& id, float v)
     {
-        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
-        // never touch the master volume, nor the Drift note generator (it would start playing by itself)
-        if (rp == nullptr || rp->paramID == "level" || rp->paramID.startsWith ("drift")) continue;
+        if (auto* p = apvts.getParameter (id))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (v);
+            p->endChangeGesture();
+        }
+    };
+    auto randomList = [&] (const char* const* ids, size_t n)
+    {
+        for (size_t i = 0; i < n; ++i)
+        {
+            float lo = 0.f, hi = 1.f;
+            for (const auto& r : ranges)
+                if (std::strcmp (r.id, ids[i]) == 0) { lo = r.lo; hi = r.hi; }
+            setNormalised (ids[i], lo + (hi - lo) * rng.nextFloat());
+        }
+    };
 
-        float lo = 0.f, hi = 1.f;
-        for (const auto& r : ranges)
-            if (rp->paramID == r.id) { lo = r.lo; hi = r.hi; }
+    // Level (master volume) and Drift (note generator) are never randomised.
+    if (scope == RandomScope::Grain || scope == RandomScope::AllSound) randomList (grain, std::size (grain));
+    if (scope == RandomScope::Play  || scope == RandomScope::AllSound) randomList (play, std::size (play));
+    if (scope == RandomScope::Fx    || scope == RandomScope::AllSound) randomList (fx, std::size (fx));
 
-        rp->beginChangeGesture();
-        rp->setValueNotifyingHost (lo + (hi - lo) * rng.nextFloat());
-        rp->endChangeGesture();
+    if (scope == RandomScope::Macros)
+    {
+        gg::Rng grng ((uint32_t) rng.nextInt() | 1u);
+        gg::Slot slots[gg::kNumMacros][gg::kSlotsPerMacro];
+        gg::randomAssign (grng, slots);
+        for (int m = 0; m < gg::kNumMacros; ++m)
+            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+            {
+                const auto tag = "m" + juce::String (m + 1) + "s" + juce::String (sl + 1);
+                if (auto* pd = apvts.getParameter (tag + "d")) setNormalised (tag + "d", pd->convertTo0to1 ((float) slots[m][sl].dest));
+                if (auto* pa = apvts.getParameter (tag + "a")) setNormalised (tag + "a", pa->convertTo0to1 (slots[m][sl].amount));
+            }
     }
 }
 

@@ -4,6 +4,7 @@
 #include "Dsp/AmbientFx.h"
 #include "Dsp/GlitchFx.h"
 #include "Dsp/GranularEngine.h"
+#include "Dsp/ModMatrix.h"
 #include "Dsp/NoteGen.h"
 
 class GlitchGrainProcessor : public juce::AudioProcessor
@@ -39,8 +40,12 @@ public:
     bool loadSample (const juce::File& file);
     juce::String getSampleName() const;
 
-    // Message thread: randomise every parameter (except Level) within musically useful ranges.
-    void randomise();
+    // Message thread: randomise one section within musically useful ranges.
+    //   Grain / Play / Fx: that section's knobs (never Level, never Drift)
+    //   Macros: assigns the 24 macro slots musically (macro values are left alone)
+    //   AllSound: Grain + Play + Fx
+    enum class RandomScope { Grain, Play, Fx, Macros, AllSound };
+    void randomise (RandomScope scope);
     // Peak profile (0..1, 320 values) of the current sample, for the waveform display.
     std::vector<float> getPeaks() const;
 
@@ -48,7 +53,8 @@ public:
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    float param (const char* id) const { return apvts.getRawParameterValue (id)->load(); }
+    // Parameter value with the macro modulation applied (when the id is a modulation destination).
+    float param (const char* id) const;
     void publishSource (std::shared_ptr<const gg::SourceBuffer> s);
 
     gg::GranularEngine engine;
@@ -60,6 +66,14 @@ private:
 
     struct Ev { int offset; int kind; int note; float vel; }; // kind: 0 on, 1 off, 2 all off
     std::vector<Ev> events;
+    // macro modulation: pointers cached once, offsets recomputed every block (audio thread)
+    std::array<std::atomic<float>*, gg::kNumMacros> macroRaw {};
+    std::atomic<float>* slotDestRaw[gg::kNumMacros][gg::kSlotsPerMacro] {};
+    std::atomic<float>* slotAmtRaw[gg::kNumMacros][gg::kSlotsPerMacro] {};
+    std::array<juce::RangedAudioParameter*, gg::kNumDests> destParam {};
+    std::array<std::atomic<float>*, gg::kNumDests> destRaw {};
+    mutable std::array<float, gg::kNumDests> modOffsets {};
+
     juce::SmoothedValue<float> level;
     double currentSampleRate = 48000.0;
 

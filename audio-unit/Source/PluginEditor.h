@@ -60,6 +60,16 @@ private:
         bool waveform = false;
         std::vector<Row> rows;
     };
+    // Macros page: one knob + 3 (target, amount) slots per macro
+    struct MacroColumn
+    {
+        Knob knob;
+        juce::ComboBox target[gg::kSlotsPerMacro];
+        juce::Slider amount[gg::kSlotsPerMacro];
+        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> targetAtt[gg::kSlotsPerMacro];
+        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> amountAtt[gg::kSlotsPerMacro];
+    };
+    void buildMacroPage();
 
     void addRow (int page, const char* title, Cell cell,
                  std::initializer_list<std::pair<const char*, const char*>> params);
@@ -69,10 +79,12 @@ private:
     GlitchGrainProcessor& proc;
     juce::OwnedArray<Knob> knobs;
     std::array<Page, 3> pages;
+    std::array<std::unique_ptr<MacroColumn>, gg::kNumMacros> macroCols;
+    juce::Rectangle<int> macroTitleBounds, macroHintBounds;
     int currentPage = 0;
 
     WaveformView waveform;
-    juce::TextButton tabButtons[3];
+    juce::TextButton tabButtons[4];
     juce::TextButton randomButton { "Random" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseGlitchEditor)

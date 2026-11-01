@@ -4,12 +4,13 @@ Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant 
 
 ## Interface
 
-Trois pages (onglets **Grain / Play / FX**) pour garder l'écran d'accueil léger :
+Quatre pages (onglets **Grain / Play / FX / Macros**) pour garder l'écran d'accueil léger. Tout démarre « à zéro » : effets, stutter, glitch, Drift et macros sont désactivés, on sculpte d'abord le son (Grain, Play) puis on ajoute les effets :
 - **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains.
 - **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.
+- **Macros** : 8 macros, chacune affectable à 3 paramètres (cible + quantité de -100 % à +100 %). Dans Ableton Live : place le plugin dans un Instrument Rack, clique sur *Configure*, bouge *Macro 1…8* et mappe-les sur les potards du Rack. Les affectations par défaut sont des thèmes musicaux (texture, nuage, hauteur, espace, écho, grain, enveloppe, mouvement).
 
-Bouton **Random** : tire au hasard tous les paramètres sauf *Level* (pour protéger les oreilles) et ceux de *Drift* (qui ne doit pas se mettre à jouer tout seul) dans des plages musicales.
+Bouton **Random** : agit sur la **page affichée** (Grain, Play, FX, ou l'affectation des macros), **Maj + clic** = toutes les pages sonores. Les tirages restent dans des plages musicales ; *Level* (volume) et *Drift* (qui ne doit pas se mettre à jouer tout seul) ne sont jamais touchés dans des plages musicales.
 **Glisser-déposer** : dépose un fichier audio (wav, aiff, mp3, flac, m4a, ogg) depuis le Finder sur la zone de la forme d'onde pour le charger. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement

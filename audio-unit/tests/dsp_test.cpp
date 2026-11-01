@@ -1,6 +1,7 @@
 // JUCE-free sanity test of the granular engine + glitch/stutter FX.
 #include "../Source/Dsp/AmbientFx.h"
 #include "../Source/Dsp/GlitchFx.h"
+#include "../Source/Dsp/ModMatrix.h"
 #include "../Source/Dsp/NoteGen.h"
 #include <set>
 #include <cstdio>
@@ -239,6 +240,50 @@ int main()
         }
         std::printf ("reverb: peak %.3f, tail after 10 s %.6f (%.1f dB)\n", pk, tailPk, 20.0 * std::log10 (tailPk / pk + 1e-12));
         CHECK (tailPk < pk * 0.003); // below -50 dB
+    }
+
+    // ---- macro modulation matrix ----
+    {
+        gg::Slot slots[gg::kNumMacros][gg::kSlotsPerMacro] = {};
+        float macros[gg::kNumMacros] = {};
+        float off[gg::kNumDests];
+        const int dPos = gg::destIndexOf ("position"), dSpray = gg::destIndexOf ("spray");
+        CHECK (dPos == 1 && dSpray == 2 && gg::destIndexOf ("nope") == 0 && gg::destIndexOf ("level") == gg::kNumDests);
+
+        // nothing assigned or macros at 0: no modulation at all
+        gg::accumulate (macros, slots, off);
+        for (int d = 0; d < gg::kNumDests; ++d) CHECK (off[d] == 0.f);
+
+        slots[0][0] = { dPos, 0.5f };    // macro 1 -> position +50 %
+        slots[0][1] = { dSpray, -0.25f };
+        slots[1][0] = { dPos, 0.25f };   // macro 2 also -> position
+        macros[0] = 1.f; macros[1] = 0.5f;
+        gg::accumulate (macros, slots, off);
+        CHECK (std::abs (off[dPos - 1] - (0.5f + 0.125f)) < 1e-6f);
+        CHECK (std::abs (off[dSpray - 1] + 0.25f) < 1e-6f);
+
+        // every default slot points at a valid destination
+        for (int m = 0; m < gg::kNumMacros; ++m)
+            for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl) CHECK (gg::defaultSlot (m, sl).dest > 0);
+
+        // random assignment: valid, distinct themes, bounded, never Level
+        const int dLevel = gg::destIndexOf ("level");
+        for (uint32_t seed = 1; seed <= 200; ++seed)
+        {
+            gg::Rng rr (seed * 7919u);
+            gg::Slot rs[gg::kNumMacros][gg::kSlotsPerMacro];
+            gg::randomAssign (rr, rs);
+            bool seen[gg::kNumDests + 1] = {};
+            for (int m = 0; m < gg::kNumMacros; ++m)
+                for (int sl = 0; sl < gg::kSlotsPerMacro; ++sl)
+                {
+                    const auto& x = rs[m][sl];
+                    CHECK (x.dest >= 1 && x.dest <= gg::kNumDests && x.dest != dLevel);
+                    CHECK (std::abs (x.amount) >= 0.01f && std::abs (x.amount) <= 0.7f + 1e-4f);
+                    CHECK (! seen[x.dest]);   // each destination used by one macro only
+                    seen[x.dest] = true;
+                }
+        }
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);
