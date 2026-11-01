@@ -1,0 +1,71 @@
+name: Build Poomse Loops (Audio Unit)
+
+on:
+  push:
+    branches: [claude/plugin-format-au-s4g5da]
+    paths: ['poomse-loops/**', '!poomse-loops/release/**', '.github/workflows/build-loops.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: poomse-loops
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate Audio Unit (auval)
+        continue-on-error: true
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Lop1 Benp
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          COMP="$(find build -name 'Poomse Loops.component' -maxdepth 6 | head -1)"
+          echo "component: $COMP"
+          ditto -c -k --keepParent "$COMP" "dist/PoomseLoops-AU-macOS.zip"
+          cat > dist/INSTALL.txt <<'TXT'
+          1. Dézippez PoomseLoops-AU-macOS.zip : vous obtenez "Poomse Loops.component".
+          2. Copiez-le dans /Library/Audio/Plug-Ins/Components/ (Finder > Aller > Aller au dossier...).
+          3. Le plugin n'est pas signé par Apple : dans le Terminal, lancez
+             sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Poomse Loops.component"
+          4. Relancez Ableton Live (Réglages > Plug-ins > Rescanner avec Option) : c'est un INSTRUMENT,
+             dans Plug-ins > Audio Units > Benoit > Poomse Loops (piste MIDI).
+          TXT
+
+      - name: Publish the zip into the repository (poomse-loops/release)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git rm -rq --ignore-unmatch poomse-loops/release
+          mkdir -p poomse-loops/release
+          cp poomse-loops/dist/PoomseLoops-AU-macOS.zip poomse-loops/dist/INSTALL.txt poomse-loops/release/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add poomse-loops/release
+          git commit -m "Publish built Poomse Loops zip" || exit 0
+          for i in 1 2 3 4; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep $((i * 5))
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoomseLoops-AU-macOS
+          path: poomse-loops/dist/*
