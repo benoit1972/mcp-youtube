@@ -4,7 +4,7 @@ Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant 
 
 ## Interface
 
-Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d'accueil léger. Tout démarre **neutre** : quand tu charges un son et joues une note (note MIDI 60, C3 dans Live = hauteur d'origine), tu l'entends **tel qu'il est** (position 0, Scan 1×, sans dispersion, sans effet, matrice vide) ; tu le construis ensuite en tournant les réglages :
+Cinq pages (onglets **Grain / Play / FX / Mod / Matrix**) pour garder l'écran d'accueil léger. Tout démarre **neutre** : quand tu charges un son et joues une note (note MIDI 60, C3 dans Live = hauteur d'origine), tu l'entends **tel qu'il est** (position 0, Scan 1×, sans dispersion, attaque 0, sans effet, matrice vide). À ces réglages les grains se recouvrent de façon parfaitement régulière et la reconstruction est identique à l'original (même fréquence d'échantillonnage que le projet ; sinon l'échantillon est rééchantillonné avec une interpolation cubique). Si tu démarres au milieu d'un son (Position > 0) et entends un clic au début de la note, augmente un peu *Attack* ; tu le construis ensuite en tournant les réglages :
 - **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains. Glisse un fichier audio dessus pour le charger.
 - **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
 - **FX** : stutter/glitch, tape/delay, reverb/shimmer.

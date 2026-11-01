@@ -400,6 +400,67 @@ int main()
         CHECK (gg::softClip (5.f) <= 1.0f && gg::softClip (-5.f) >= -1.0f);
     }
 
+    // ---- transparency on a piano-like sound: sharp attack, decaying harmonics ----
+    {
+        auto makePiano = [] (double srcRate)
+        {
+            auto b = std::make_shared<gg::SourceBuffer>();
+            b->sampleRate = srcRate;
+            const int len = (int) (srcRate * 3.0);
+            b->l.resize ((size_t) len); b->r.resize ((size_t) len);
+            gg::Rng nz (77);
+            for (int i = 0; i < len; ++i)
+            {
+                const double t = (double) i / srcRate;
+                double v = 0;
+                for (int h = 1; h <= 8; ++h)
+                    v += std::sin (2.0 * 3.14159265358979 * 261.6 * h * t) * std::exp (-t * (1.5 + h * 0.9)) / (double) h;
+                const double hammer = t < 0.004 ? nz.bi() * (1.0 - t / 0.004) * 0.6 : 0.0;   // 4 ms noise burst
+                b->l[(size_t) i] = b->r[(size_t) i] = (float) (0.55 * (v + hammer));
+            }
+            return b;
+        };
+        auto energy = [] (const std::vector<float>& v, int a, int b)
+        {
+            double acc = 0; for (int i = std::max (0, a); i < b; ++i) acc += (double) v[(size_t) i] * v[(size_t) i];
+            return acc;
+        };
+
+        // same sample rate: the neutral output should be (almost) the source itself
+        {
+            auto pb = makePiano (sr);
+            const int total = (int) (sr * 1.5);
+            gg::GranularEngine pe; pe.prepare (sr);
+            gg::GrainParams pn;
+            pe.noteOn (60, 1.f);
+            std::vector<float> oL ((size_t) total), oR ((size_t) total);
+            pe.render (oL.data(), oR.data(), total, *pb, pn);
+            double errAcc = 0, sigAcc = 0;
+            for (int i = 0; i < total; ++i) { const double d = (double) oL[(size_t) i] - pb->l[(size_t) i]; errAcc += d * d; sigAcc += (double) pb->l[(size_t) i] * pb->l[(size_t) i]; }
+            const double errDb = 10.0 * std::log10 (errAcc / sigAcc + 1e-20);
+            const double onset = energy (oL, 0, (int) (0.010 * sr)) / energy (pb->l, 0, (int) (0.010 * sr));
+            std::printf ("piano neutral (same rate): error %.1f dB below the signal, first 10 ms at %.1f%% of the source energy\n", -errDb, onset * 100.0);
+            CHECK (errDb < -60.0);            // rebuilt almost exactly
+            CHECK (onset > 0.98 && onset < 1.02); // the attack is there from the first millisecond
+        }
+        // 44.1 kHz sample in a 48 kHz project: resampled, but the attack must still be present and level right
+        {
+            auto pb = makePiano (44100.0);
+            const int total = (int) (sr * 1.5);
+            gg::GranularEngine pe; pe.prepare (sr);
+            gg::GrainParams pn;
+            pe.noteOn (60, 1.f);
+            std::vector<float> oL ((size_t) total), oR ((size_t) total);
+            pe.render (oL.data(), oR.data(), total, *pb, pn);
+            const double eOut = energy (oL, 0, (int) (0.010 * sr)) / sr, eSrc = energy (pb->l, 0, (int) (0.010 * 44100.0)) / 44100.0;
+            const double onset = eOut / eSrc;
+            const double whole = (energy (oL, 0, total) / sr) / (energy (pb->l, 0, (int) (1.5 * 44100.0)) / 44100.0);
+            std::printf ("piano neutral (44.1k in 48k): first 10 ms at %.1f%%, whole note at %.1f%% of the source energy\n", onset * 100.0, whole * 100.0);
+            CHECK (onset > 0.85 && onset < 1.15);
+            CHECK (whole > 0.9 && whole < 1.1);
+        }
+    }
+
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);
     return fails == 0 ? 0 : 1;
 }

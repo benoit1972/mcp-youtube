@@ -83,7 +83,7 @@ struct GrainParams
     float reverse = 0.f;     // 0..1 probability a grain plays backwards
     float panSpread = 0.f;   // 0..1
     float shape = 0.f;       // 0 = hann, 1 = near-rectangular window
-    float attack = 0.01f, decay = 0.3f, sustain = 1.f, release = 0.4f; // seconds / level
+    float attack = 0.f, decay = 0.3f, sustain = 1.f, release = 0.4f; // seconds / level
 };
 
 //==============================================================================
@@ -93,7 +93,7 @@ public:
     void setSampleRate (double s) { sr = (float) s; }
     void setParams (float a, float d, float s, float r)
     {
-        attackInc = 1.0f / std::max (0.001f, a) / sr;
+        attackInc = a <= 0.0005f ? 1.0f : 1.0f / std::max (0.001f, a) / sr; // 0 = instant: the attack of the sound untouched
         decayCoef = std::exp (-4.6f / (std::max (0.005f, d) * sr));
         sustain = std::clamp (s, 0.f, 1.f);
         releaseCoef = std::exp (-6.9f / (std::max (0.005f, r) * sr));
@@ -144,6 +144,12 @@ struct Grain
     int age = 0, len = 1;
     float gl = 0.f, gr = 0.f, fade = 0.5f;
 
+    // Catmull-Rom: returns y1 exactly at t = 0
+    static inline float cubic (float y0, float y1, float y2, float y3, float t)
+    {
+        return y1 + 0.5f * t * (y2 - y0 + t * (2.f * y0 - 5.f * y1 + 4.f * y2 - y3 + t * (3.f * (y1 - y2) + y3 - y0)));
+    }
+
     inline void tick (const SourceBuffer& s, float& outL, float& outR)
     {
         const int n = s.size();
@@ -152,12 +158,13 @@ struct Grain
         if (t < fade)             w = 0.5f * (1.f - std::cos (kPi * t / fade));
         else if (t > 1.f - fade)  w = 0.5f * (1.f - std::cos (kPi * (1.f - t) / fade));
 
-        const int i0 = std::clamp ((int) pos, 0, n - 1);
-        const float fr = (float) (pos - (double) i0);
-        const int i1 = i0 + 1 >= n ? 0 : i0 + 1;
-        const size_t a = (size_t) i0, b = (size_t) i1;
-        outL += (s.l[a] + fr * (s.l[b] - s.l[a])) * w * gl;
-        outR += (s.r[a] + fr * (s.r[b] - s.r[a])) * w * gr;
+        const int i1 = std::clamp ((int) pos, 0, n - 1);
+        const float fr = (float) (pos - (double) i1);
+        const int i0 = i1 == 0 ? n - 1 : i1 - 1;
+        const int i2 = i1 + 1 >= n ? 0 : i1 + 1;
+        const int i3 = i2 + 1 >= n ? 0 : i2 + 1;
+        outL += cubic (s.l[(size_t) i0], s.l[(size_t) i1], s.l[(size_t) i2], s.l[(size_t) i3], fr) * w * gl;
+        outR += cubic (s.r[(size_t) i0], s.r[(size_t) i1], s.r[(size_t) i2], s.r[(size_t) i3], fr) * w * gr;
 
         pos += inc;
         while (pos >= (double) n) pos -= (double) n;
@@ -184,6 +191,7 @@ public:
         note = n; velocity = vel; startOrder = order; held = true;
         countdown = 0.f;
         scanFrac = 0.0;
+        prerollPending = true;
         env.noteOn();
     }
     void noteOff() { held = false; env.noteOff(); }
@@ -198,19 +206,39 @@ public:
     {
         if (! env.isActive() || src.size() < 2) return;
         env.setParams (p.attack, p.decay, p.sustain, p.release);
-        const float interval = sr / std::max (1.f, p.density);
-        // spacing is almost regular unless Spray asks for a looser cloud (regular overlap = transparent playback)
-        const float jitter = 0.02f + 0.23f * std::min (1.f, p.spray * 4.f);
+        const float lenSec = p.sizeMs * 0.001f;
+        const float overlapRaw = std::max (1.f, p.density * lenSec);
+        // With no spray and a dense enough cloud the grains are laid out like a perfect overlap-add:
+        // an integer number of equally spaced Hann windows sums to a constant, so the sound is rebuilt
+        // without any amplitude modulation (no audible grains). Spray / sparse clouds keep the loose behaviour.
+        const bool clean = p.spray <= 0.005f && overlapRaw >= 2.f;
+        const float nEff = clean ? std::round (overlapRaw) : overlapRaw;
+        const float interval = clean ? (lenSec * sr) / nEff : sr / std::max (1.f, p.density);
+        const float jitter = clean ? 0.f : 0.02f + 0.23f * std::min (1.f, p.spray * 4.f);
+        const float lenJitter = clean ? 0.f : 0.1f * std::min (1.f, p.spray * 4.f);
         // playhead advance per output sample, as a fraction of the source (natural speed at scan = 1)
         const double scanInc = (double) p.scan * src.sampleRate / ((double) sr * (double) src.size());
-        const float overlap = std::max (1.f, p.density * p.sizeMs * 0.001f);
-        const float norm = velocity / std::sqrt (overlap);
+        const float norm = velocity * (clean ? 2.f / nEff : 1.f / std::sqrt (overlapRaw));
+
+        if (prerollPending)
+        {
+            // Start in the middle of the steady state: staggered, already-running grains whose windows sum to 1
+            // right now, so the very first milliseconds (the attack) are not faded in by the first window.
+            prerollPending = false;
+            if (overlapRaw >= 2.f)
+            {
+                const int count = (int) std::floor (nEff);
+                for (int k = 0; k < count; ++k)
+                    spawn (src, p, norm, lenJitter, (int) ((float) k * interval));
+                countdown = interval;
+            }
+        }
 
         for (int i = 0; i < numSamples; ++i)
         {
             if (countdown <= 0.f)
             {
-                spawn (src, p, norm);
+                spawn (src, p, norm, lenJitter, 0);
                 countdown += interval * (1.f - jitter + 2.f * jitter * rng.uni());
             }
             countdown -= 1.f;
@@ -229,7 +257,7 @@ public:
     }
 
 private:
-    void spawn (const SourceBuffer& src, const GrainParams& p, float norm)
+    void spawn (const SourceBuffer& src, const GrainParams& p, float norm, float lenJitter, int ageOffset)
     {
         Grain* g = nullptr;
         for (auto& x : grains) if (! x.active) { g = &x; break; }
@@ -237,8 +265,8 @@ private:
 
         const int n = src.size();
         const float lenSamples = p.sizeMs * 0.001f * sr;
-        g->len = std::max (16, (int) (lenSamples * (0.9f + 0.2f * rng.uni())));
-        g->age = 0;
+        g->len = std::max (16, (int) (lenSamples * (1.f - lenJitter + 2.f * lenJitter * rng.uni())));
+        g->age = std::min (ageOffset, g->len - 1);
         g->fade = 0.5f - 0.45f * std::clamp (p.shape, 0.f, 1.f);
 
         double start = (double) p.position + scanFrac + (double) p.spray * rng.bi();
@@ -267,6 +295,7 @@ private:
     Rng rng;
     float sr = 48000.f, countdown = 0.f, velocity = 1.f;
     double scanFrac = 0.0;
+    bool prerollPending = false;
     int note = 60;
     bool held = false;
     uint64_t startOrder = 0;

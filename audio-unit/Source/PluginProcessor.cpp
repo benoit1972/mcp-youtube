@@ -44,7 +44,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout GlitchGrainProcessor::create
     l.add (std::make_unique<F> (pid ("level"),      "Level",        Range (-48.f, 6.f, 0.1f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (db)));
 
-    l.add (std::make_unique<F> (pid ("attack"),  "Attack",  Range (0.001f, 5.f, 0.001f, 0.35f), 0.01f,
+    l.add (std::make_unique<F> (pid ("attack"),  "Attack",  Range (0.f, 5.f, 0.001f, 0.35f), 0.f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
     l.add (std::make_unique<F> (pid ("decay"),   "Decay",   Range (0.005f, 5.f, 0.001f, 0.35f), 0.3f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction (sec)));
