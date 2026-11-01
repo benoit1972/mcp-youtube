@@ -173,6 +173,7 @@ PoomseLoopsEditor::PoomseLoopsEditor (PoomseLoopsProcessor& p) : AudioProcessorE
     setLookAndFeel (&laf);
     addAndMakeVisible (recordView);
 
+    makeKnob ("position", "Position"); makeKnob ("size", "Size");     // the cross-hair, also movable on the map
     makeKnob ("seam", "Seam"); makeKnob ("moire", "Moire"); makeKnob ("scan", "Scan");
     makeKnob ("pulse", "Pulse"); makeKnob ("tail", "Tail"); makeKnob ("level", "Level");
 
@@ -235,7 +236,7 @@ void PoomseLoopsEditor::paint (juce::Graphics& g)
 
     g.setColour (look::dim);
     g.setFont (juce::Font (juce::FontOptions (11.f)));
-    g.drawText ("Drop a record on the map. Play keys: each one takes the loop under the cross-hair. Click or drag on the map to move it.",
+    g.drawText ("Drop a record on the map. Each key takes the loop under the cross-hair: move it on the map, or with Position (across) and Size (up).",
                 kPad, getHeight() - 30, getWidth() - 2 * kPad, 16, juce::Justification::centredLeft, false);
 }
 
