@@ -73,8 +73,7 @@ private:
 
     WaveformView waveform;
     juce::TextButton tabButtons[3];
-    juce::TextButton loadButton { "Load" }, randomButton { "Random" };
-    std::unique_ptr<juce::FileChooser> chooser;
+    juce::TextButton randomButton { "Random" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseGlitchEditor)
 };

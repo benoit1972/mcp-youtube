@@ -197,22 +197,10 @@ PoomseGlitchEditor::PoomseGlitchEditor (GlitchGrainProcessor& p)
     }
     tabButtons[0].setToggleState (true, juce::dontSendNotification);
 
-    loadButton.setComponentID ("pill");
     randomButton.setComponentID ("pillAccent");
-    addAndMakeVisible (loadButton);
     addAndMakeVisible (randomButton);
 
     randomButton.onClick = [this] { proc.randomise(); };
-    loadButton.onClick = [this]
-    {
-        chooser = std::make_unique<juce::FileChooser> ("Choose an audio file", juce::File(), "*.wav;*.aif;*.aiff;*.mp3;*.flac;*.m4a");
-        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                              [this] (const juce::FileChooser& fc)
-                              {
-                                  const auto f = fc.getResult();
-                                  if (f != juce::File()) proc.loadSample (f);
-                              });
-    };
 
     setSize (kWidth, kHeight);
     showPage (0);
@@ -266,7 +254,6 @@ void PoomseGlitchEditor::paint (juce::Graphics& g)
 void PoomseGlitchEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
-    loadButton.setBounds (randomButton.getX() - 10 - 80, 18, 80, 30);
     for (int i = 0; i < 3; ++i)
         tabButtons[i].setBounds (kPad + i * 88, 66, 80, 30);
 
