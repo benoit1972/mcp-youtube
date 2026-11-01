@@ -100,7 +100,7 @@ void BreakView::paint (juce::Graphics& g)
 
     // the band the hits are taken from, and its line
     const float cx = px (place);
-    g.setColour (look::accent.withAlpha (0.07));
+    g.setColour (look::accent.withAlpha (0.07f));
     g.fillRect (juce::Rectangle<float> (cx - 24.f, m.getY(), 48.f, m.getHeight()));
     g.setColour (look::accent.withAlpha (0.55f));
     g.fillRect (cx - 0.5f, m.getY(), 1.f, m.getHeight());
