@@ -1,9 +1,11 @@
 #pragma once
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "Dsp/ModMatrix.h"
 #include "Dsp/Modulators.h"
 #include "Dsp/PadReverb.h"
 #include "Dsp/Presets.h"
+#include "Dsp/Sampler.h"
 #include "Dsp/SpectralPad.h"
 #include "Dsp/Util.h"
 
@@ -22,7 +24,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return "Poomse Pad"; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 30.0; }
 
@@ -63,11 +65,28 @@ public:
     int getSeqStep() const { return seq.currentStep(); }
     float getDisplayBand (int i) const { return spectrumDisplay[(size_t) i].load(); }
 
+    // The sound source: a sample (built-in drone until a file is dropped on the window). Message thread only.
+    bool loadSample (const juce::File& file);
+    juce::String getSampleName() const;
+    std::vector<float> getPeaks() const; // 320 normalised peaks, for the display
+
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     float param (const char* id) const; // value with the macro modulation applied
+
+    void publishSource (std::shared_ptr<const pad::SourceBuffer> s);
+
+    // Source hand-over: message thread publishes, audio thread picks it up with a try-lock. Retired buffers stay
+    // alive until the message thread purges them, so the audio thread never frees memory.
+    juce::SpinLock sourceLock;
+    std::shared_ptr<const pad::SourceBuffer> source;      // guarded by sourceLock
+    std::shared_ptr<const pad::SourceBuffer> audioSource; // audio thread only
+    std::vector<std::shared_ptr<const pad::SourceBuffer>> retired; // message thread only
+    mutable juce::SpinLock peakLock;
+    std::vector<float> peaks;
+    pad::Sampler sampler;
 
     pad::SpectralPad padEngine;
     pad::Reverb reverb;

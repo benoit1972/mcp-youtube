@@ -22,6 +22,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomsePadProcessor::createLa
     l.add (std::make_unique<F> (pid ("time"),   "Time",   Range (0.1f, 60.f, 0.01f, 0.4f), 4.f, attr (sec)));
     l.add (std::make_unique<F> (pid ("rise"),   "Rise",   Range (0.02f, 10.f, 0.01f, 0.4f), 0.8f, attr (sec)));
     l.add (std::make_unique<juce::AudioParameterBool> (pid ("hold"), "Hold", false));
+    l.add (std::make_unique<juce::AudioParameterBool> (pid ("loop"), "Loop Sample", true));
     l.add (std::make_unique<F> (pid ("sub"),    "Sub (-12 st)",    Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("body"),   "Body",            Range (0.f, 1.f, 0.001f), 1.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("fifth"),  "Fifth (+7 st)",   Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
@@ -63,9 +64,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomsePadProcessor::createLa
 }
 
 PoomsePadProcessor::PoomsePadProcessor()
-    : AudioProcessor (BusesProperties()
-                          .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createLayout())
 {
     for (int i = 0; i < gg::kNumDests; ++i)
@@ -89,6 +88,7 @@ PoomsePadProcessor::PoomsePadProcessor()
     for (auto& m : matrix) m.store (0.f); // the matrix starts empty
     for (auto& v : sourceDisplay) v.store (0.f);
     for (auto& v : spectrumDisplay) v.store (0.f);
+    publishSource (pad::SourceBuffer::makeDefault());
 }
 
 float PoomsePadProcessor::param (const char* id) const
@@ -107,6 +107,7 @@ void PoomsePadProcessor::prepareToPlay (double sampleRate, int)
 {
     currentSampleRate = sampleRate;
     padEngine.prepare (sampleRate);
+    sampler.prepare (sampleRate);
     reverb.prepare (sampleRate);
     lfo[0].prepare (sampleRate, 0x1F123u);
     lfo[1].prepare (sampleRate, 0x2B4C5u);
@@ -120,14 +121,21 @@ void PoomsePadProcessor::prepareToPlay (double sampleRate, int)
 
 bool PoomsePadProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo()
-        && layouts.getMainInputChannelSet() == juce::AudioChannelSet::stereo();
+    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
 
-void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    buffer.clear();
     if (buffer.getNumChannels() < 2) return;
+
+    {
+        const juce::SpinLock::ScopedTryLockType lock (sourceLock);
+        if (lock.isLocked() && source != audioSource) audioSource = source;
+    }
+    if (audioSource == nullptr) return;
+    const auto& src = *audioSource;
 
     double hostBpm = 120.0;
     if (auto* ph = getPlayHead())
@@ -139,23 +147,23 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     // modulation sources -> matrix -> per-destination offsets (once per block)
     {
-        float src[gg::kNumSources];
-        for (int m = 0; m < gg::kNumMacros; ++m) src[m] = macroRaw[(size_t) m]->load();
+        float srcv[gg::kNumSources];
+        for (int m = 0; m < gg::kNumMacros; ++m) srcv[m] = macroRaw[(size_t) m]->load();
         for (int i = 0; i < 2; ++i)
-            src[gg::kSrcLfo1 + i] = lfo[i].advance (n, lfoRaw[i][0]->load(), (int) lfoRaw[i][1]->load(), hostBpm, (int) lfoRaw[i][2]->load());
+            srcv[gg::kSrcLfo1 + i] = lfo[i].advance (n, lfoRaw[i][0]->load(), (int) lfoRaw[i][1]->load(), hostBpm, (int) lfoRaw[i][2]->load());
         gg::SeqParams sp;
         sp.steps = (int) seqRaw[0]->load();    sp.hits = (int) seqRaw[1]->load();
         sp.rotation = (int) seqRaw[2]->load();  sp.rateDiv = (int) seqRaw[3]->load();
         sp.decaySec = seqRaw[4]->load();       sp.randomAmt = seqRaw[5]->load();
         sp.bpm = hostBpm;
-        src[gg::kSrcSeq] = seq.advance (n, sp);
+        srcv[gg::kSrcSeq] = seq.advance (n, sp);
 
         gg::Matrix mat;
         for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx)
             for (int d = 0; d < gg::kNumDests; ++d)
                 mat.amt[sIdx][d] = matrix[(size_t) (sIdx * gg::kNumDests + d)].load();
-        gg::accumulate (src, mat, modOffsets.data());
-        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx) sourceDisplay[(size_t) sIdx].store (src[sIdx]);
+        gg::accumulate (srcv, mat, modOffsets.data());
+        for (int sIdx = 0; sIdx < gg::kNumSources; ++sIdx) sourceDisplay[(size_t) sIdx].store (srcv[sIdx]);
     }
 
     pad::PadParams pp;
@@ -165,6 +173,7 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     pp.fifth = param ("fifth");      pp.octave = param ("octave");
     pp.tone = param ("tone");        pp.width = param ("width");
     pp.evolve = param ("evolve");    pp.evolveRate = param ("rate");
+    const bool loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
 
     const float revMix = param ("revMix");
     reverb.setSize (param ("revSize"));
@@ -174,9 +183,22 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     float* L = buffer.getWritePointer (0);
     float* R = buffer.getWritePointer (1);
 
+    auto it = midi.begin();
     for (int i = 0; i < n; ++i)
     {
-        const float dryL = L[i], dryR = R[i];
+        // MIDI, sample-accurate: keys start / stop the sample player that feeds the pad
+        while (it != midi.end() && (*it).samplePosition <= i)
+        {
+            const auto m = (*it).getMessage();
+            if (m.isNoteOn())                                   sampler.noteOn (m.getNoteNumber(), m.getFloatVelocity(), src);
+            else if (m.isNoteOff())                             sampler.noteOff (m.getNoteNumber());
+            else if (m.isAllNotesOff() || m.isAllSoundOff())    sampler.allOff();
+            ++it;
+        }
+
+        float dryL, dryR;
+        sampler.process (src, loop, dryL, dryR);
+
         float wl, wr;
         padEngine.process (dryL, dryR, pp, wl, wr);
 
@@ -282,6 +304,69 @@ void PoomsePadProcessor::applyPreset (int index)
     currentPreset.store (index);
 }
 
+void PoomsePadProcessor::publishSource (std::shared_ptr<const pad::SourceBuffer> s)
+{
+    {
+        constexpr int bins = 320;
+        std::vector<float> pk ((size_t) bins, 0.f);
+        const int n = s->size();
+        float top = 1e-6f;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto b = (size_t) ((juce::int64) i * bins / n);
+            pk[b] = std::max ({ pk[b], std::abs (s->l[(size_t) i]), std::abs (s->r[(size_t) i]) });
+            top = std::max (top, pk[b]);
+        }
+        for (auto& v : pk) v /= top;
+        const juce::SpinLock::ScopedLockType pl (peakLock);
+        peaks = std::move (pk);
+    }
+
+    const juce::SpinLock::ScopedLockType lock (sourceLock);
+    if (source != nullptr) retired.push_back (std::move (source));
+    source = std::move (s);
+    // free retired buffers that the audio thread no longer references
+    retired.erase (std::remove_if (retired.begin(), retired.end(),
+                                   [] (const auto& p) { return p.use_count() == 1; }),
+                   retired.end());
+}
+
+bool PoomsePadProcessor::loadSample (const juce::File& file)
+{
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr || reader->lengthInSamples < 64 || reader->sampleRate <= 0.0) return false;
+
+    const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
+    juce::AudioBuffer<float> tmp (2, len);
+    tmp.clear();
+    if (! reader->read (&tmp, 0, len, 0, true, true)) return false;
+
+    auto s = std::make_shared<pad::SourceBuffer>();
+    s->sampleRate = reader->sampleRate;
+    const float* a = tmp.getReadPointer (0);
+    const float* b = tmp.getReadPointer (reader->numChannels > 1 ? 1 : 0);
+    s->l.assign (a, a + len);
+    s->r.assign (b, b + len);
+
+    publishSource (std::move (s));
+    apvts.state.setProperty ("samplePath", file.getFullPathName(), nullptr);
+    return true;
+}
+
+juce::String PoomsePadProcessor::getSampleName() const
+{
+    const auto path = apvts.state.getProperty ("samplePath").toString();
+    return path.isEmpty() ? "Built-in drone" : juce::File (path).getFileName();
+}
+
+std::vector<float> PoomsePadProcessor::getPeaks() const
+{
+    const juce::SpinLock::ScopedLockType pl (peakLock);
+    return peaks;
+}
+
 juce::AudioProcessorEditor* PoomsePadProcessor::createEditor() { return new PoomsePadEditor (*this); }
 
 void PoomsePadProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -300,6 +385,12 @@ void PoomsePadProcessor::setStateInformation (const void* data, int size)
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             restoreMatrix (apvts.state.getProperty ("matrix").toString());
             currentPreset.store (juce::jlimit (0, getNumPresets() - 1, (int) apvts.state.getProperty ("preset", 0)));
+            const auto path = apvts.state.getProperty ("samplePath").toString();
+            if (path.isNotEmpty())
+            {
+                const juce::File f (path);
+                if (f.existsAsFile()) loadSample (f);
+            }
         }
 }
 

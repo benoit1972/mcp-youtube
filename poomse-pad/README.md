@@ -1,8 +1,8 @@
-# Poomse Pad — effet AU qui transforme n'importe quel son en pad évolutif
+# Poomse Pad — instrument AU qui transforme n'importe quel sample en pad évolutif
 
-Effet Audio Unit (`aufx`) basé sur [JUCE](https://juce.com). Tu l'insères sur une piste (piano, voix, guitare, sample de batterie…) :
-le son qui entre est étiré en une **nappe continue** qui garde sa couleur harmonique, se transforme lentement et dure bien
-après la fin de la note. Indépendant de Poomse Glitch (dossier `audio-unit/`), mêmes fonctions de modulation, autre couleur.
+Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). **Glisse un sample sur la fenêtre** (piano, voix, guitare, batterie…, wav / aiff / mp3 / flac / m4a / ogg, 60 s max ; un drone intégré sert au départ), puis **joue au clavier MIDI** (note 60 = C3 = hauteur d'origine ; polyphonie 8 voix) :
+le son est étiré en une **nappe continue** qui garde sa couleur harmonique, se transforme lentement et dure bien
+après la fin de la note. Le bouton **Loop** (en haut à droite de la zone du spectre) fait boucler le sample tant que la touche est tenue ; sans Loop, il joue une fois puis le pad continue de se déployer. Quand tu relâches la touche, l'échantillon s'éteint en 60 ms et le pad retombe selon *Time*. *Mix* mélange le sample d'origine (dry) et le pad. Indépendant de Poomse Glitch (dossier `audio-unit/`), mêmes fonctions de modulation, autre couleur.
 
 ## Comment ça marche
 
@@ -34,7 +34,7 @@ Dans Ableton Live : *Configure* dans le plugin, bouge *Macro 1…8* et mappe-les
 cd poomse-pad
 cmake -B build -G Xcode
 cmake --build build --config Release
-auval -v aufx Pad1 Benp
+auval -v aumu Pad1 Benp
 ```
 
 Le dépôt contient un workflow GitHub (`.github/workflows/build-pad.yml`) qui compile le plugin sur Mac et publie le zip dans `poomse-pad/release/`.

@@ -25,16 +25,16 @@ else()
   set(PP_FORMATS Standalone) # AU only exists on macOS; Standalone lets other OSes compile-check the code
 endif()
 
-# An audio EFFECT (aufx): the sound of the track goes through it.
+# An INSTRUMENT (aumu): drop a sample on the window, play it with the keyboard, the spectral pad builds from it.
 juce_add_plugin(PoomsePad
   COMPANY_NAME "Benoit"
   PLUGIN_MANUFACTURER_CODE Benp
   PLUGIN_CODE Pad1
   FORMATS ${PP_FORMATS}
   PRODUCT_NAME "Poomse Pad"
-  AU_MAIN_TYPE kAudioUnitType_Effect
-  IS_SYNTH FALSE
-  NEEDS_MIDI_INPUT FALSE
+  AU_MAIN_TYPE kAudioUnitType_MusicDevice
+  IS_SYNTH TRUE
+  NEEDS_MIDI_INPUT TRUE
   NEEDS_MIDI_OUTPUT FALSE
   COPY_PLUGIN_AFTER_BUILD ${APPLE})
 
@@ -50,6 +50,8 @@ target_sources(PoomsePad PRIVATE
   Source/Dsp/PadReverb.h
   Source/Dsp/ModMatrix.h
   Source/Dsp/Modulators.h
+  Source/Dsp/Sampler.h
+  Source/Dsp/Presets.h
   Source/Dsp/Util.h)
 
 target_compile_definitions(PoomsePad PUBLIC

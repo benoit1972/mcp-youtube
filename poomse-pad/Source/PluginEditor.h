@@ -3,16 +3,27 @@
 #include "PluginProcessor.h"
 
 // Live spectrum of the pad (what is actually being synthesised), auto-scaled so it always shows the shape.
-class SpectrumView : public juce::Component, private juce::Timer
+// It is also the drop zone: drag an audio file from the Finder onto it to load the sample.
+class SpectrumView : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
-    explicit SpectrumView (PoomsePadProcessor& p) : proc (p) { startTimerHz (30); }
+    explicit SpectrumView (PoomsePadProcessor& p);
     void paint (juce::Graphics&) override;
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void fileDragEnter (const juce::StringArray&, int, int) override { dropHover = true; repaint(); }
+    void fileDragExit (const juce::StringArray&) override { dropHover = false; repaint(); }
+    void filesDropped (const juce::StringArray& files, int, int) override;
+
 private:
-    void timerCallback() override { if (isVisible()) repaint(); }
+    void timerCallback() override;
     PoomsePadProcessor& proc;
     float peakDb = -60.f;
     std::array<float, pad::kDisplayBands> smooth {};
+    std::vector<float> peaks;
+    juce::String name, message;
+    int messageTicks = 0;
+    bool dropHover = false;
 };
 
 // Pattern of the euclidean sequencer (hits filled, current step ringed).
@@ -100,7 +111,8 @@ private:
     ModMatrixView matrixView;
     juce::TextButton tabButtons[4];
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" };
-    juce::TextButton prevPreset { "<" }, nextPreset { ">" };
+    juce::TextButton prevPreset { "<" }, nextPreset { ">" }, loopButton { "Loop" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> loopAttachment;
     juce::ComboBox presetBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
     bool resetArmed = false;

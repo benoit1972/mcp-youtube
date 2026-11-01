@@ -5,6 +5,7 @@
 #include "../Source/Dsp/Modulators.h"
 #include "../Source/Dsp/Util.h"
 #include "../Source/Dsp/Presets.h"
+#include "../Source/Dsp/Sampler.h"
 #include <set>
 #include <string>
 #include <cstdio>
@@ -339,6 +340,59 @@ int main()
             CHECK (macroCells == 11);
             for (const auto& p : list[i].params) CHECK (std::string (p.id) != "hold");
         }
+    }
+
+    // ---- sample player ----
+    {
+        auto sb = std::make_shared<pad::SourceBuffer>();
+        sb->sampleRate = sr;
+        const int len = (int) (sr * 1.0);
+        sb->l.resize ((size_t) len); sb->r.resize ((size_t) len);
+        for (int i = 0; i < len; ++i) sb->l[(size_t) i] = sb->r[(size_t) i] = 0.5f * (float) std::sin (2.0 * 3.14159265358979 * 440.0 * (double) i / sr);
+        auto zc = [] (const std::vector<float>& v, int a, int b) { int c = 0; for (int i = a + 1; i < b; ++i) if (v[(size_t) i - 1] < 0.f && v[(size_t) i] >= 0.f) ++c; return c; };
+
+        // root note plays the sample as it is; an octave up doubles the frequency
+        for (int test = 0; test < 2; ++test)
+        {
+            pad::Sampler sp; sp.prepare (sr);
+            sp.noteOn (test == 0 ? 60 : 72, 1.f, *sb);
+            std::vector<float> o ((size_t) sr);
+            for (int i = 0; i < (int) sr; ++i) { float l, r; sp.process (*sb, true, l, r); o[(size_t) i] = l; }
+            const int cycles = zc (o, 2000, (int) sr - 2000);
+            const double expect = (test == 0 ? 440.0 : 880.0) * ((sr - 4000) / sr);
+            CHECK (std::abs (cycles - expect) < expect * 0.03);
+        }
+
+        // looping keeps playing well past the end of the sample, one-shot stops
+        for (int loop = 0; loop < 2; ++loop)
+        {
+            pad::Sampler sp; sp.prepare (sr);
+            sp.noteOn (60, 1.f, *sb);
+            std::vector<float> o ((size_t) (sr * 3));
+            for (int i = 0; i < (int) (sr * 3); ++i) { float l, r; sp.process (*sb, loop == 1, l, r); o[(size_t) i] = l; }
+            const double late = rmsOf (o, (int) (sr * 2.0), (int) (sr * 3.0));
+            if (loop) CHECK (late > 0.2); else CHECK (late < 1e-6);
+            // no big jump at the loop point
+            if (loop) { double jump = 0; for (int i = 1; i < (int) (sr * 3); ++i) jump = std::max (jump, (double) std::abs (o[(size_t) i] - o[(size_t) i - 1])); CHECK (jump < 0.15); }
+        }
+
+        // note-off fades to silence quickly; polyphony and stealing never blow up
+        {
+            pad::Sampler sp; sp.prepare (sr);
+            sp.noteOn (60, 1.f, *sb);
+            for (int i = 0; i < 2000; ++i) { float l, r; sp.process (*sb, true, l, r); }
+            sp.noteOff (60);
+            float l = 0, r = 0;
+            for (int i = 0; i < (int) (0.2 * sr); ++i) sp.process (*sb, true, l, r);
+            CHECK (std::abs (l) < 1e-6f && ! sp.anyActive());
+            for (int n = 0; n < 40; ++n) sp.noteOn (40 + n, 1.f, *sb);
+            double mx = 0;
+            for (int i = 0; i < 20000; ++i) { sp.process (*sb, true, l, r); mx = std::max (mx, (double) std::max (std::abs (l), std::abs (r))); CHECK (std::isfinite (l) && std::isfinite (r)); }
+            CHECK (mx < 8.0);
+        }
+        // the built-in drone is a valid source
+        auto d = pad::SourceBuffer::makeDefault (sr);
+        CHECK (d->size() == (int) (sr * 4.0));
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);
