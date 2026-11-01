@@ -20,7 +20,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "Glitch Grain"; }
+    const juce::String getName() const override { return "Poomse Glitch"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -38,6 +38,11 @@ public:
     // Message thread only. Returns false if the file cannot be read.
     bool loadSample (const juce::File& file);
     juce::String getSampleName() const;
+
+    // Message thread: randomise every parameter (except Level) within musically useful ranges.
+    void randomise();
+    // Peak profile (0..1, 320 values) of the current sample, for the waveform display.
+    std::vector<float> getPeaks() const;
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -59,6 +64,9 @@ private:
     // Source hand-over: message thread publishes, audio thread picks it up with a try-lock.
     // Retired buffers are kept alive until the message thread purges them, so the audio
     // thread never frees memory.
+    mutable juce::SpinLock peakLock;
+    std::vector<float> peaks;
+
     juce::SpinLock sourceLock;
     std::shared_ptr<const gg::SourceBuffer> source;      // guarded by sourceLock
     std::shared_ptr<const gg::SourceBuffer> audioSource; // audio thread only

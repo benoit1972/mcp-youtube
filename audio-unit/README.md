@@ -1,6 +1,16 @@
-# Glitch Grain — synthé granulaire ambient AU (glitch, stutter, tape, shimmer, notes génératives)
+# Poomse Glitch — synthé granulaire ambient AU (glitch, stutter, tape, shimmer, notes génératives)
 
 Instrument Audio Unit (`aumu`) basé sur [JUCE](https://juce.com). Indépendant du serveur MCP YouTube du reste du dépôt.
+
+## Interface
+
+Trois pages (onglets **Grain / Play / FX**) pour garder l'écran d'accueil léger :
+- **Grain** : forme d'onde cliquable (position + zone de spray) et les réglages du nuage de grains.
+- **Play** : enveloppe ADSR et moteur de notes génératif *Drift*.
+- **FX** : stutter/glitch, tape/delay, reverb/shimmer.
+
+Bouton **Random** : tire au hasard tous les paramètres (sauf *Level*, pour protéger les oreilles) dans des plages musicales.
+Bouton **Load** : charge un échantillon audio. Double-clic sur un potard : valeur par défaut.
 
 ## Fonctionnement
 

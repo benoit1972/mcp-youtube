@@ -1,4 +1,4 @@
-name: Build Glitch Grain (Audio Unit)
+name: Build Poomse Glitch (Audio Unit)
 
 on:
   push:
@@ -40,21 +40,23 @@ jobs:
           mkdir -p dist
           COMP="$(find build -name '*.component' -maxdepth 6 | head -1)"
           echo "component: $COMP"
-          ditto -c -k --keepParent "$COMP" "dist/GlitchGrain-AU-macOS.zip"
+          ditto -c -k --keepParent "$COMP" "dist/PoomseGlitch-AU-macOS.zip"
           cat > dist/INSTALL.txt <<'TXT'
-          1. Dézippez GlitchGrain-AU-macOS.zip : vous obtenez "Glitch Grain.component".
+          0. Si vous aviez "Glitch Grain.component" : supprimez-le de ~/Library/Audio/Plug-Ins/Components/ (même identifiant, conflit sinon).
+          1. Dézippez PoomseGlitch-AU-macOS.zip : vous obtenez "Poomse Glitch.component".
           2. Copiez-le dans  ~/Bibliothèque/Audio/Plug-Ins/Components/
              (Finder > Aller > Aller au dossier... > ~/Library/Audio/Plug-Ins/Components)
           3. Le plugin n'est pas signé par Apple : dans le Terminal, lancez
-             xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/Glitch Grain.component"
-          4. Relancez Logic Pro / GarageBand (instrument : Audio Units > Benoit > Glitch Grain).
+             xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/Components/Poomse Glitch.component"
+          4. Relancez Logic Pro / GarageBand (instrument : Audio Units > Benoit > Poomse Glitch).
           TXT
 
       - name: Publish the zip into the repository (audio-unit/release)
         working-directory: ${{ github.workspace }}
         run: |
+          git rm -rq --ignore-unmatch audio-unit/release
           mkdir -p audio-unit/release
-          cp audio-unit/dist/GlitchGrain-AU-macOS.zip audio-unit/dist/INSTALL.txt audio-unit/release/
+          cp audio-unit/dist/PoomseGlitch-AU-macOS.zip audio-unit/dist/INSTALL.txt audio-unit/release/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add audio-unit/release
@@ -64,5 +66,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: GlitchGrain-AU-macOS
+          name: PoomseGlitch-AU-macOS
           path: audio-unit/dist/*

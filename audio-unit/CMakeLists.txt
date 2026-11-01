@@ -30,7 +30,7 @@ juce_add_plugin(GlitchGrain
   PLUGIN_MANUFACTURER_CODE Benp
   PLUGIN_CODE Ggr1
   FORMATS ${GG_FORMATS}
-  PRODUCT_NAME "Glitch Grain"
+  PRODUCT_NAME "Poomse Glitch"
   AU_MAIN_TYPE kAudioUnitType_MusicDevice
   IS_SYNTH TRUE
   NEEDS_MIDI_INPUT TRUE
@@ -42,6 +42,7 @@ target_sources(GlitchGrain PRIVATE
   Source/PluginProcessor.h
   Source/PluginEditor.cpp
   Source/PluginEditor.h
+  Source/Look.h
   Source/Dsp/Rng.h
   Source/Dsp/GranularEngine.h
   Source/Dsp/GlitchFx.h

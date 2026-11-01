@@ -114,6 +114,22 @@ bool GlitchGrainProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 
 void GlitchGrainProcessor::publishSource (std::shared_ptr<const gg::SourceBuffer> s)
 {
+    {
+        constexpr int bins = 320;
+        std::vector<float> pk ((size_t) bins, 0.f);
+        const int n = s->size();
+        float top = 1e-6f;
+        for (int i = 0; i < n; ++i)
+        {
+            const auto b = (size_t) ((juce::int64) i * bins / n);
+            pk[b] = std::max ({ pk[b], std::abs (s->l[(size_t) i]), std::abs (s->r[(size_t) i]) });
+            top = std::max (top, pk[b]);
+        }
+        for (auto& v : pk) v /= top;
+        const juce::SpinLock::ScopedLockType pl (peakLock);
+        peaks = std::move (pk);
+    }
+
     const juce::SpinLock::ScopedLockType lock (sourceLock);
     if (source != nullptr) retired.push_back (std::move (source));
     source = std::move (s);
@@ -252,7 +268,43 @@ juce::String GlitchGrainProcessor::getSampleName() const
     return path.isEmpty() ? "Built-in drone" : juce::File (path).getFileName();
 }
 
-juce::AudioProcessorEditor* GlitchGrainProcessor::createEditor() { return new GlitchGrainEditor (*this); }
+std::vector<float> GlitchGrainProcessor::getPeaks() const
+{
+    const juce::SpinLock::ScopedLockType pl (peakLock);
+    return peaks;
+}
+
+void GlitchGrainProcessor::randomise()
+{
+    // Normalised (0..1) ranges that keep the result playable; anything not listed is fully random.
+    struct R { const char* id; float lo, hi; };
+    static const R ranges[] = {
+        { "size", 0.10f, 0.85f },   { "density", 0.20f, 0.90f },  { "pitch", 0.25f, 0.75f },
+        { "pitchSpray", 0.f, 0.5f }, { "reverse", 0.f, 0.7f },
+        { "attack", 0.f, 0.55f },   { "decay", 0.10f, 0.80f },    { "sustain", 0.35f, 1.f },
+        { "release", 0.10f, 0.80f },
+        { "stutter", 0.f, 0.6f },   { "stutterPitch", 0.25f, 0.75f }, { "glitch", 0.f, 0.5f },
+        { "tape", 0.f, 0.8f },      { "delayFb", 0.f, 0.75f },    { "delayMix", 0.f, 0.6f },
+        { "reverbSize", 0.2f, 1.f }, { "reverbMix", 0.05f, 0.6f }, { "shimmer", 0.f, 0.7f },
+    };
+
+    juce::Random rng;
+    for (auto* p : getParameters())
+    {
+        auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
+        if (rp == nullptr || rp->paramID == "level") continue; // never touch the master volume
+
+        float lo = 0.f, hi = 1.f;
+        for (const auto& r : ranges)
+            if (rp->paramID == r.id) { lo = r.lo; hi = r.hi; }
+
+        rp->beginChangeGesture();
+        rp->setValueNotifyingHost (lo + (hi - lo) * rng.nextFloat());
+        rp->endChangeGesture();
+    }
+}
+
+juce::AudioProcessorEditor* GlitchGrainProcessor::createEditor() { return new PoomseGlitchEditor (*this); }
 
 void GlitchGrainProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
