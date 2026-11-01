@@ -357,7 +357,7 @@ int main()
             pad::Sampler sp; sp.prepare (sr);
             sp.noteOn (test == 0 ? 60 : 72, 1.f, *sb, *sb);
             std::vector<float> o ((size_t) sr);
-            for (int i = 0; i < (int) sr; ++i) { float l, r, l2, r2; sp.process (*sb, *sb, true, l, r, l2, r2); o[(size_t) i] = l; }
+            for (int i = 0; i < (int) sr; ++i) { float l, r, l2, r2; sp.process (*sb, *sb, true, true, l, r, l2, r2); o[(size_t) i] = l; }
             const int cycles = zc (o, 2000, (int) sr - 2000);
             const double expect = (test == 0 ? 440.0 : 880.0) * ((sr - 4000) / sr);
             CHECK (std::abs (cycles - expect) < expect * 0.03);
@@ -369,7 +369,7 @@ int main()
             pad::Sampler sp; sp.prepare (sr);
             sp.noteOn (60, 1.f, *sb, *sb);
             std::vector<float> o ((size_t) (sr * 3));
-            for (int i = 0; i < (int) (sr * 3); ++i) { float l, r, l2, r2; sp.process (*sb, *sb, loop == 1, l, r, l2, r2); o[(size_t) i] = l; }
+            for (int i = 0; i < (int) (sr * 3); ++i) { float l, r, l2, r2; sp.process (*sb, *sb, loop == 1, loop == 1, l, r, l2, r2); o[(size_t) i] = l; }
             const double late = rmsOf (o, (int) (sr * 2.0), (int) (sr * 3.0));
             if (loop) CHECK (late > 0.2); else CHECK (late < 1e-6);
             // no big jump at the loop point
@@ -381,13 +381,13 @@ int main()
             pad::Sampler sp; sp.prepare (sr);
             sp.noteOn (60, 1.f, *sb, *sb);
             float l = 0, r = 0, l2, r2;
-            for (int i = 0; i < 2000; ++i) sp.process (*sb, *sb, true, l, r, l2, r2);
+            for (int i = 0; i < 2000; ++i) sp.process (*sb, *sb, true, true, l, r, l2, r2);
             sp.noteOff (60);
-            for (int i = 0; i < (int) (0.2 * sr); ++i) sp.process (*sb, *sb, true, l, r, l2, r2);
+            for (int i = 0; i < (int) (0.2 * sr); ++i) sp.process (*sb, *sb, true, true, l, r, l2, r2);
             CHECK (std::abs (l) < 1e-6f && ! sp.anyActive());
             for (int n = 0; n < 40; ++n) sp.noteOn (40 + n, 1.f, *sb, *sb);
             double mx = 0;
-            for (int i = 0; i < 20000; ++i) { sp.process (*sb, *sb, true, l, r, l2, r2); mx = std::max (mx, (double) std::max (std::abs (l), std::abs (r))); CHECK (std::isfinite (l) && std::isfinite (r)); }
+            for (int i = 0; i < 20000; ++i) { sp.process (*sb, *sb, true, true, l, r, l2, r2); mx = std::max (mx, (double) std::max (std::abs (l), std::abs (r))); CHECK (std::isfinite (l) && std::isfinite (r)); }
             CHECK (mx < 8.0);
         }
         // the built-in drone is a valid source
@@ -465,6 +465,31 @@ int main()
             }
             CHECK (std::abs (db (e[0] / e[1])) < 0.6);
         }
+    }
+
+    // ---- loop per zone: A one-shot, B looping ----
+    {
+        auto mk = [&] (double f)
+        {
+            auto b = std::make_shared<pad::SourceBuffer>();
+            b->sampleRate = sr;
+            const int len = (int) (sr * 1.0);
+            b->l.resize ((size_t) len); b->r.resize ((size_t) len);
+            for (int i = 0; i < len; ++i) b->l[(size_t) i] = b->r[(size_t) i] = 0.5f * (float) std::sin (2.0 * 3.14159265358979 * f * (double) i / sr);
+            return b;
+        };
+        auto a = mk (440.0), b = mk (660.0);
+        pad::Sampler sp; sp.prepare (sr);
+        sp.noteOn (60, 1.f, *a, *b);
+        std::vector<float> oa ((size_t) (sr * 3)), ob ((size_t) (sr * 3));
+        for (int i = 0; i < (int) (sr * 3); ++i) { float al, ar, bl, br; sp.process (*a, *b, false, true, al, ar, bl, br); oa[(size_t) i] = al; ob[(size_t) i] = bl; }
+        CHECK (rmsOf (oa, (int) (sr * 2.0), (int) (sr * 3.0)) < 1e-6);   // A (one-shot) has ended
+        CHECK (rmsOf (ob, (int) (sr * 2.0), (int) (sr * 3.0)) > 0.2);    // B (loop) keeps going, and the voice stays alive for it
+        // both one-shots: the voice dies by itself once both are over
+        pad::Sampler sq; sq.prepare (sr);
+        sq.noteOn (60, 1.f, *a, *b);
+        for (int i = 0; i < (int) (sr * 2.0); ++i) { float al, ar, bl, br; sq.process (*a, *b, false, false, al, ar, bl, br); }
+        CHECK (! sq.anyActive());
     }
 
     std::printf (fails == 0 ? "ALL TESTS PASSED\n" : "%d FAILURES\n", fails);

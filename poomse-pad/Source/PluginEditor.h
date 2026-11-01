@@ -22,6 +22,7 @@ class SamplePanel : public juce::Component, public juce::FileDragAndDropTarget, 
 public:
     SamplePanel (PoomsePadProcessor& p, int slotIndex);
     void paint (juce::Graphics&) override;
+    void resized() override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void fileDragEnter (const juce::StringArray&, int, int) override { dropHover = true; repaint(); }
@@ -37,6 +38,8 @@ private:
     int messageTicks = 0;
     float weight = 1.f;
     bool dropHover = false;
+    juce::TextButton loopToggle { "Loop" };   // loop this sample while the key is held (otherwise: plays once)
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> loopAttachment;
 };
 
 // Pattern of the euclidean sequencer (hits filled, current step ringed).
@@ -125,8 +128,8 @@ private:
     ModMatrixView matrixView;
     juce::TextButton tabButtons[4];
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" };
-    juce::TextButton prevPreset { "<" }, nextPreset { ">" }, loopButton { "Loop" }, layersButton { "Layers" };
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> loopAttachment, layersAttachment;
+    juce::TextButton prevPreset { "<" }, nextPreset { ">" }, layersButton { "Layers" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> layersAttachment;
     juce::ComboBox presetBox;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
     bool resetArmed = false;

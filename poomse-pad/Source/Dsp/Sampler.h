@@ -116,7 +116,7 @@ public:
     bool anyActive() const { for (const auto& v : voices) if (v.active) return true; return false; }
 
     // one stereo sample of each source (sum of all voices)
-    void process (const SourceBuffer& a, const SourceBuffer& b, bool loop,
+    void process (const SourceBuffer& a, const SourceBuffer& b, bool loopA, bool loopB,
                   float& aL, float& aR, float& bL, float& bR)
     {
         aL = aR = bL = bR = 0.f;
@@ -130,9 +130,10 @@ public:
             else { v.env -= releaseInc; if (v.env <= 0.f) { v = Voice{}; continue; } }
 
             const float g = v.env * v.vel * 0.7f;
-            bool finished = true;
+            bool running = false; // is at least one source still producing sound for this voice?
             for (int s = 0; s < 2; ++s)
             {
+                const bool loop = s == 0 ? loopA : loopB;
                 const auto& src = *srcs[s];
                 const int n = src.size();
                 if (n < 4) continue;
@@ -140,7 +141,9 @@ public:
                 const int loopEnd = n - fade;
                 double pos = v.pos[s];
                 float l, r;
-                if (loop && fade > 1 && pos >= (double) loopEnd)
+                if (! loop && pos >= (double) (n - 1))
+                    l = r = 0.f;                                   // a one-shot that ended is silent (not stuck on its last value)
+                else if (loop && fade > 1 && pos >= (double) loopEnd)
                 {
                     const float t = (float) ((pos - (double) loopEnd) / (double) fade);
                     float al, ar, bl, br;
@@ -154,10 +157,10 @@ public:
                 *outs[s][0] += l * g; *outs[s][1] += r * g;
 
                 v.pos[s] += v.inc[s];
-                if (loop) { while (v.pos[s] >= (double) n) v.pos[s] -= (double) loopEnd; finished = false; }
-                else if (v.pos[s] < (double) (n - 1)) finished = false;
+                if (loop) { while (v.pos[s] >= (double) n) v.pos[s] -= (double) loopEnd; running = true; }
+                else if (v.pos[s] < (double) (n - 1)) running = true;
             }
-            if (! loop && finished) v.held = false; // both one-shots reached their end: let the voice fade out
+            if (! running) v.held = false; // every source is a one-shot that reached its end: let the voice fade out
         }
     }
 

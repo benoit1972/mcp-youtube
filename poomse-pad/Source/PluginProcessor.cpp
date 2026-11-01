@@ -22,7 +22,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomsePadProcessor::createLa
     l.add (std::make_unique<F> (pid ("time"),   "Time",   Range (0.1f, 60.f, 0.01f, 0.4f), 4.f, attr (sec)));
     l.add (std::make_unique<F> (pid ("rise"),   "Rise",   Range (0.02f, 10.f, 0.01f, 0.4f), 0.8f, attr (sec)));
     l.add (std::make_unique<juce::AudioParameterBool> (pid ("hold"), "Hold", false));
-    l.add (std::make_unique<juce::AudioParameterBool> (pid ("loop"), "Loop Sample", true));
+    l.add (std::make_unique<juce::AudioParameterBool> (pid ("loopA"), "Loop A", true));
+    l.add (std::make_unique<juce::AudioParameterBool> (pid ("loopB"), "Loop B", true));
     l.add (std::make_unique<juce::AudioParameterBool> (pid ("layers"), "Layers Mode", false));
     l.add (std::make_unique<F> (pid ("sub"),    "Sub (-12 st)",    Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
     l.add (std::make_unique<F> (pid ("body"),   "Body",            Range (0.f, 1.f, 0.001f), 1.f, attr (pct)));
@@ -182,7 +183,8 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     pp.morph = juce::jlimit (0.f, 1.f, param ("morph"));
     pp.layers = apvts.getRawParameterValue ("layers")->load() > 0.5f;
     morphDisplay.store (pp.morph);
-    const bool loop = apvts.getRawParameterValue ("loop")->load() > 0.5f;
+    const bool loopA = apvts.getRawParameterValue ("loopA")->load() > 0.5f;
+    const bool loopB = apvts.getRawParameterValue ("loopB")->load() > 0.5f;
 
     const float revMix = param ("revMix");
     reverb.setSize (param ("revSize"));
@@ -208,7 +210,7 @@ void PoomsePadProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
 
         float aL, aR, bL, bR;
-        sampler.process (srcA, srcB, loop, aL, aR, bL, bR);
+        sampler.process (srcA, srcB, loopA, loopB, aL, aR, bL, bR);
         const float gA = pp.layers ? dryGainA : 1.f - pp.morph, gB = pp.layers ? dryGainB : pp.morph; // the raw samples, same law as the pad
         const float dryL = aL * gA + bL * gB;
         const float dryR = aR * gA + bR * gB;

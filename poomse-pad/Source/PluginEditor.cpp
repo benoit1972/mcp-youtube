@@ -56,7 +56,16 @@ SamplePanel::SamplePanel (PoomsePadProcessor& p, int slotIndex) : proc (p), slot
 {
     peaks = proc.getPeaks (slot);
     name = proc.getSampleName (slot);
+    loopToggle.setComponentID ("toggle");
+    loopToggle.setClickingTogglesState (true);
+    loopAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, slot == 0 ? "loopA" : "loopB", loopToggle);
+    addAndMakeVisible (loopToggle);
     startTimerHz (30);
+}
+
+void SamplePanel::resized()
+{
+    loopToggle.setBounds (getWidth() - 62, getHeight() - 28, 52, 20);
 }
 
 void SamplePanel::timerCallback()
@@ -420,10 +429,6 @@ PoomsePadEditor::PoomsePadEditor (PoomsePadProcessor& p)
     holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "hold", holdButton);
     addAndMakeVisible (holdButton);
 
-    loopButton.setComponentID ("toggle");
-    loopButton.setClickingTogglesState (true);
-    loopAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "loop", loopButton);
-    addAndMakeVisible (loopButton);
     layersButton.setComponentID ("toggle");   // off = Morph (A turns into B), on = Layers (A and B always together)
     layersButton.setClickingTogglesState (true);
     layersAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "layers", layersButton);
@@ -478,7 +483,6 @@ void PoomsePadEditor::showPage (int index)
     spectrum.setVisible (showSpectrum);
     panelA.setVisible (showSpectrum);
     panelB.setVisible (showSpectrum);
-    loopButton.setVisible (showSpectrum);
     layersButton.setVisible (showSpectrum);
     euclid.setVisible (index == 2);
     matrixView.setVisible (index == 3);
@@ -552,9 +556,7 @@ void PoomsePadEditor::resized()
             panelA.setBounds (kPad, y, zoneW, kSpectrumHeight);
             panelB.setBounds (kPad + contentW - zoneW, y, zoneW, kSpectrumHeight);
             spectrum.setBounds (kPad + zoneW + gap, y, contentW - 2 * (zoneW + gap), kSpectrumHeight);
-            loopButton.setBounds (spectrum.getRight() - 64, y + 6, 54, 22);
-            layersButton.setBounds (loopButton.getX() - 62, y + 6, 58, 22);
-            loopButton.toFront (false);
+            layersButton.setBounds (spectrum.getRight() - 70, y + 6, 58, 22);
             layersButton.toFront (false);
             y += kSpectrumHeight + 14;
         }
