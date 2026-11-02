@@ -239,26 +239,33 @@ void PoomseShardsEditor::timerCallback()
 
 void PoomseShardsEditor::load (const juce::File& file)
 {
-    // the answer is immediate: the name appears at once, and the loading itself starts a moment later, once it has been drawn
+    // The answer is immediate (the name shows at once) and nothing blocks: the sound is read and cut in the background, with new
+    // attempts for several seconds, and only then put in place.
     breakView.setDropHover (false);
-    breakView.showMessage ("LOADING " + file.getFileName().toUpperCase() + "...", 30);
-    juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<PoomseShardsEditor> (this), file]
+    breakView.showMessage ("LOADING " + file.getFileName().toUpperCase() + "...", 60);
+    juce::Thread::launch ([safe = juce::Component::SafePointer<PoomseShardsEditor> (this), file]
     {
-        if (safe == nullptr) return;
-        const auto result = safe->proc.loadBreak (file);
-        safe->breakView.showMessage (result.wasOk() ? "LOADED " + file.getFileName().toUpperCase() : result.getErrorMessage(), result.wasOk() ? 4 : 10);
+        PoomseShardsProcessor::Loaded loaded;
+        const auto read = PoomseShardsProcessor::readBreak (file, loaded, 10);
+        juce::MessageManager::callAsync ([safe, file, loaded, read]
+        {
+            if (safe == nullptr) return;
+            const auto result = read.wasOk() ? safe->proc.installBreak (loaded, file) : read;
+            safe->breakView.showMessage (result.wasOk() ? "LOADED  " + loaded.info : result.getErrorMessage(), result.wasOk() ? 8 : 15);
+        });
     });
 }
 
 bool PoomseShardsEditor::isInterestedInFileDrag (const juce::StringArray& files)
 {
-    for (const auto& f : files) if (juce::File (f).existsAsFile()) return true;      // whatever it is, the reader decides, and says why if it cannot
+    // an audio file that is not there yet (still arriving from iCloud) is taken too: the loader waits for it
+    for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) return true; }
     return false;
 }
 
 void PoomseShardsEditor::filesDropped (const juce::StringArray& files, int, int)
 {
-    for (const auto& f : files) if (juce::File (f).existsAsFile()) { load (juce::File (f)); return; }
+    for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) { load (ff); return; } }
     breakView.setDropHover (false);
     breakView.showMessage ("NOTHING USABLE WAS DROPPED (A FILE FROM THE FINDER IS EXPECTED)");
 }

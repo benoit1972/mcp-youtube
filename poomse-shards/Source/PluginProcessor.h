@@ -32,7 +32,12 @@ public:
     void setStateInformation (const void*, int) override;
 
     // ---- message thread ----
-    juce::Result loadBreak (const juce::File& file);              // ok, or the reason it did not work
+    // Loading a sound is done in two steps so that it never blocks the interface: reading and cutting it (any thread, it retries for a
+    // few seconds: a file that is still being downloaded from iCloud is not readable at the first try), then putting it in place (message thread).
+    struct Loaded { std::shared_ptr<sh::Kit> kit; int bars = 1; juce::String info; };
+    static juce::Result readBreak (const juce::File& file, Loaded& out, int attempts);
+    juce::Result installBreak (const Loaded& loaded, const juce::File& file);
+    juce::Result loadBreak (const juce::File& file);              // both at once (a saved project that is being reopened)
     void useBuiltInBreak();
     juce::String getBreakName() const;
 
@@ -67,7 +72,7 @@ private:
     sh::Engine engine;
     juce::SmoothedValue<float> levelS;
     double currentSampleRate = 48000.0, internalBeat = 0.0;
-    int lastBars = -1;
+    int lastBars = -1, defaultBars = 1;
     std::atomic<int> currentPreset { 0 };
 
     juce::SpinLock kitLock;

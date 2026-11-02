@@ -122,6 +122,7 @@ PoomseShardsProcessor::View PoomseShardsProcessor::getView() const
 
 void PoomseShardsProcessor::useBuiltInBreak()
 {
+    defaultBars = 1;                                  // the built-in break is two bars
     apvts.state.setProperty ("break", juce::String(), nullptr);
     publish (builtInKit());
 }
@@ -132,45 +133,73 @@ juce::String PoomseShardsProcessor::getBreakName() const
     return path.isNotEmpty() ? juce::File (path).getFileName() : juce::String ("boom, tchak, a hat in the air (built in)");
 }
 
+juce::Result PoomseShardsProcessor::readBreak (const juce::File& file, Loaded& out, int attempts)
+{
+    juce::String why = "CANNOT READ " + file.getFileName().toUpperCase();
+    for (int attempt = 0; attempt < std::max (1, attempts); ++attempt)
+    {
+        if (attempt > 0) juce::Thread::sleep (700);       // (a file that is still arriving from iCloud, or a permission that has just been granted)
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+        if (reader == nullptr)
+        {
+            why = file.existsAsFile() ? "CANNOT READ " + file.getFileName().toUpperCase() + " (A FORMAT THIS PLUGIN DOES NOT KNOW, OR THE FILE IS NOT READABLE)"
+                                      : file.getFileName().toUpperCase() + " IS NOT THERE (YET?)";
+            continue;
+        }
+        if (reader->sampleRate <= 0.0 || reader->lengthInSamples < 4096) return juce::Result::fail (file.getFileName().toUpperCase() + " IS TOO SHORT");
+
+        const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
+        juce::AudioBuffer<float> tmp (2, len);
+        tmp.clear();
+        if (! reader->read (&tmp, 0, len, 0, true, true)) { why = "COULD NOT READ THE AUDIO IN " + file.getFileName().toUpperCase(); continue; }
+
+        auto k = std::make_shared<sh::Kit>();
+        k->sampleRate = reader->sampleRate;
+        k->x.resize ((size_t) len);
+        const float* a = tmp.getReadPointer (0);
+        const float* b = tmp.getReadPointer (reader->numChannels > 1 ? 1 : 0);
+        for (int i = 0; i < len; ++i) k->x[(size_t) i] = 0.5f * (a[i] + b[i]);
+        // cut the trailing silence so that the length of the file is the length of the loop
+        int end = len;
+        while (end > 1000 && std::abs (k->x[(size_t) end - 1]) < 0.002f) --end;
+        k->x.resize ((size_t) end);
+        k->analyse();                       // cut the break into its hits
+        if (k->slices.empty()) return juce::Result::fail (file.getFileName().toUpperCase() + " IS SILENT");
+
+        // guess how many bars it is: the tempo that comes out should be one a person would play
+        const double seconds = (double) k->x.size() / k->sampleRate;
+        int best = 1; double bestScore = 1e9;
+        for (int i = 0; i < 4; ++i)
+        {
+            const double beats = 4.0 * (double) (1 << i), tempo = 60.0 * beats / seconds;
+            const double score = std::abs (std::log (tempo / 100.0));
+            if (score < bestScore) { bestScore = score; best = i; }
+        }
+        out.kit = k; out.bars = best;
+        out.info = file.getFileName().toUpperCase() + " - " + juce::String (seconds, 1) + " S - " + juce::String ((int) reader->numChannels) + " CH - "
+                   + juce::String (juce::roundToInt (reader->sampleRate)) + " HZ - " + juce::String ((int) reader->bitsPerSample) + " BIT - " + juce::String ((int) k->slices.size()) + " HITS";
+        return juce::Result::ok();
+    }
+    return juce::Result::fail (why);
+}
+
+juce::Result PoomseShardsProcessor::installBreak (const Loaded& loaded, const juce::File& file)
+{
+    if (loaded.kit == nullptr) return juce::Result::fail ("NOTHING TO LOAD");
+    defaultBars = loaded.bars;
+    if (auto* p = apvts.getParameter ("bars")) p->setValueNotifyingHost (p->convertTo0to1 ((float) loaded.bars));
+    apvts.state.setProperty ("break", file.getFullPathName(), nullptr);
+    publish (loaded.kit);
+    return juce::Result::ok();
+}
+
 juce::Result PoomseShardsProcessor::loadBreak (const juce::File& file)
 {
-    juce::AudioFormatManager fm;
-    fm.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
-    if (reader == nullptr) return juce::Result::fail ("CANNOT READ " + file.getFileName().toUpperCase() + " (NOT AN AUDIO FILE THIS PLUGIN KNOWS)");
-    if (reader->sampleRate <= 0.0 || reader->lengthInSamples < 4096) return juce::Result::fail (file.getFileName().toUpperCase() + " IS TOO SHORT");
-
-    const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
-    juce::AudioBuffer<float> tmp (2, len);
-    tmp.clear();
-    if (! reader->read (&tmp, 0, len, 0, true, true)) return juce::Result::fail ("COULD NOT READ THE AUDIO IN " + file.getFileName().toUpperCase());
-
-    auto k = std::make_shared<sh::Kit>();
-    k->sampleRate = reader->sampleRate;
-    k->x.resize ((size_t) len);
-    const float* a = tmp.getReadPointer (0);
-    const float* b = tmp.getReadPointer (reader->numChannels > 1 ? 1 : 0);
-    for (int i = 0; i < len; ++i) k->x[(size_t) i] = 0.5f * (a[i] + b[i]);
-    // cut the trailing silence so that the length of the file is the length of the loop
-    int end = len;
-    while (end > 1000 && std::abs (k->x[(size_t) end - 1]) < 0.002f) --end;
-    k->x.resize ((size_t) end);
-    k->analyse();                       // cut the break into its hits
-    if (k->slices.empty()) return juce::Result::fail (file.getFileName().toUpperCase() + " IS SILENT");
-
-    // guess how many bars it is: the tempo that comes out should be one a person would play
-    const double seconds = (double) k->x.size() / k->sampleRate;
-    int best = 1; double bestScore = 1e9;
-    for (int i = 0; i < 4; ++i)
-    {
-        const double beats = 4.0 * (double) (1 << i), tempo = 60.0 * beats / seconds;
-        const double score = std::abs (std::log (tempo / 100.0));
-        if (score < bestScore) { bestScore = score; best = i; }
-    }
-    if (auto* p = apvts.getParameter ("bars")) p->setValueNotifyingHost (p->convertTo0to1 ((float) best));
-    apvts.state.setProperty ("break", file.getFullPathName(), nullptr);
-    publish (std::move (k));
-    return juce::Result::ok();
+    Loaded l;
+    const auto r = readBreak (file, l, 1);
+    return r.wasOk() ? installBreak (l, file) : r;
 }
 
 void PoomseShardsProcessor::uiNote (int note, bool on)
@@ -270,9 +299,9 @@ void PoomseShardsProcessor::resetToDefaults()
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
         {
-            if (rp->getParameterID() == "bars") continue;          // the length of the loop belongs to the break, not to the sound
             rp->beginChangeGesture();
-            rp->setValueNotifyingHost (rp->getDefaultValue());
+            // every parameter goes back to the value it has when the plugin opens; the length of the loop to the one that fits the sound that is loaded
+            rp->setValueNotifyingHost (rp->getParameterID() == "bars" ? rp->convertTo0to1 ((float) defaultBars) : rp->getDefaultValue());
             rp->endChangeGesture();
         }
     currentPreset.store (0);
