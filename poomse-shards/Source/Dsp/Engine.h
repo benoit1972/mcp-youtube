@@ -5,40 +5,57 @@
 #include <cmath>
 #include <vector>
 
-// A loop player that you take apart with seven keys. The break plays in time with the song, each hit where it belongs in the bar.
-//   LOOP   the loop exactly as it is.            BREAK  the loop taken apart, bar after bar (Mutate says how far).
-// The other five take the floor for as long as the key is held, then give the loop back, always on the grid:
-//   ROLL UP   a stutter-edit ramp: the rate climbs through the grid, the pitch rises, the level swells; held, it stays at full speed.
-//   ROLL DOWN the ramp that stretches: slower and slower, lower and lower, fading away.
-//   REVERSE   the beat you have just heard, backwards, again and again.
-//   STOP      the loop slows down and stops like a tape.
-//   DROP      silence; when the key is let go, the loop comes back with a hard hit.
+// A loop player that you take apart. The break plays in time with the song, each hit where it belongs in the bar.
+// PLAYBACK pads (white keys from C2 up): which version of the loop plays. One at a time and it stays selected (Latch), or stacked while held.
+//   Original   the loop as it is                      Break    taken apart at random, bar after bar (Mutate says how far)
+//   Ratchet    snares and hats turn into rolls         Flip     beats 2 and 4 played backwards
+//   Swap       kicks and snares change places          Shove    pushed an eighth note late
+//   Ghost      soft hits in every gap
+// FILL pads (white keys below C2): they take the floor for exactly as long as the key is down, and the playback is back the moment it is let go.
+//   Roll up    a stutter-edit ramp: the rate climbs through the grid, the pitch rises, the level swells; held, it stays at full speed
+//   Roll down  the ramp that stretches: slower, lower, fading        Stutter  the last hit, again and again
+//   Reverse    the beat you have just heard, backwards               Stop     the loop slows down and stops like a tape
+//   Hats       a flurry of hats                                       Drop     silence; let go and the loop comes back with a hard hit
 // Everything falls on the grid. The dice are loaded by the song position and the seed: the same bar breaks the same way.
 namespace sh
 {
-enum Key { KeyLoop = 0, KeyBreak, KeyRollUp, KeyRollDown, KeyReverse, KeyStop, KeyDrop, numKeys };
-inline constexpr const char* kKeyNames[numKeys] = { "Loop", "Break", "Roll up", "Roll down", "Reverse", "Stop", "Drop" };
-inline constexpr const char* kKeyHelp[numKeys] = {
-    "LOOP - the loop, exactly as it is. Hold it for the whole clip, then play the others on top.",
-    "BREAK - the loop taken apart: hits swapped, pushed, backwards, ghosts, rolls. Mutate says how far.",
-    "ROLL UP - a stutter-edit ramp: it speeds up, rises in pitch and swells. Hold it: it stays at full speed.",
-    "ROLL DOWN - the ramp that stretches out: slower, lower, fading away. Hold it: it dies away.",
-    "REVERSE - the beat you just heard, backwards, again and again while you hold it.",
-    "STOP - the loop slows down and stops like a tape. Hold it: it stays stopped.",
+enum Play { PlayOriginal = 0, PlayBreak, PlayRatchet, PlayFlip, PlaySwap, PlayShove, PlayGhost, numPlays };
+inline constexpr const char* kPlayNames[numPlays] = { "Original", "Break", "Ratchet", "Flip", "Swap", "Shove", "Ghost" };
+inline constexpr const char* kPlayTags[numPlays] = { "the loop, as it is", "taken apart", "snares and hats roll", "beats 2 and 4 backwards", "kicks and snares trade", "an eighth late", "soft hits in the gaps" };
+inline constexpr const char* kPlayHelp[numPlays] = {
+    "ORIGINAL - the loop exactly as it is.",
+    "BREAK - the loop taken apart, differently every bar: hits swapped, pushed, backwards, ghosts, rolls. Mutate says how far.",
+    "RATCHET - the snares and hats turn into rolls that speed up along the grid.",
+    "FLIP - beats 2 and 4 are played backwards.",
+    "SWAP - the kicks and the snares change places.",
+    "SHOVE - the whole loop is pushed an eighth note late: everything lands off the beat.",
+    "GHOST - soft hats and ghost hits fill every gap.",
+};
+enum Fill { FillRollUp = 0, FillRollDown, FillStutter, FillReverse, FillStop, FillHats, FillDrop, numFills };
+inline constexpr const char* kFillNames[numFills] = { "Roll up", "Roll down", "Stutter", "Reverse", "Stop", "Hats", "Drop" };
+inline constexpr const char* kFillTags[numFills] = { "speeds up, rises", "slows, stretches", "the last hit again", "backwards", "like a tape", "a flurry of hats", "silence, then back" };
+inline constexpr const char* kFillHelp[numFills] = {
+    "ROLL UP - a stutter-edit ramp: it speeds up along the grid, rises in pitch and swells. Held, it stays at full speed.",
+    "ROLL DOWN - the ramp that stretches out: slower, lower, fading away.",
+    "STUTTER - the last hit, again and again.",
+    "REVERSE - the beat you just heard, backwards, again and again.",
+    "STOP - the loop slows down and stops like a tape. Held, it stays stopped.",
+    "HATS - a flurry of hats.",
     "DROP - silence while you hold it. Let go: the loop comes back with a hard hit.",
 };
-// the white keys C D E F G A B; each black key is the same as the white key below it, at any octave
-inline int keyOfNote (int note) { static const int m[12] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 }; return m[((note % 12) + 12) % 12]; }
-inline bool isGesture (int key) { return key >= KeyRollUp; }
+// the white keys C D E F G A B; each black key is the same as the white key below it. From C2 (48) up: playback pads. Below C2: fills.
+inline int whiteIndex (int note) { static const int m[12] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 }; return m[((note % 12) + 12) % 12]; }
+inline bool isFillNote (int note) { return note < 48; }
 
 struct Params
 {
-    float mutate = 0.45f;   // how far BREAK takes the loop apart (a gentle curve: low = small refined changes, high = another loop)
+    float mutate = 0.6f;    // how much of the loop the selected playback takes hold of (a gentle curve: low = small refined changes, high = another loop)
     float ramp = 0.6f;      // how far the rolls go: how fast they get, and how far the pitch travels
     float groove = 1.f;     // 1 = the hits keep their feel, 0 = everything snapped to the grid
     float tune = 0.f;       // semitones
     float gate = 0.9f;      // how much of its step a roll repeat fills
-    int quant = 3;          // a key starts on the next: 0 at once, 1 = 1/4, 2 = 1/8, 3 = 1/16
+    int quant = 3;          // a playback key starts on the next: 0 at once, 1 = 1/4, 2 = 1/8, 3 = 1/16
+    bool latch = true;      // a playback pad stays selected when it is let go (otherwise it plays while held, and several can be stacked)
     int seed = 1;
 };
 
@@ -71,23 +88,23 @@ public:
 
     void noteOn (int note, float velocity, const Params& p)
     {
-        const int key = keyOfNote (note);
-        if (isGesture (key)) { startFill (key - KeyRollUp, note, velocity, p); return; }
+        if (isFillNote (note)) { startFill (whiteIndex (note), note, velocity, p); return; }
         Vc* v = nullptr;
-        for (auto& x : vc) if (x.on && x.note == note) { v = &x; break; }                // the same key again: start over
+        for (auto& x : vc) if (x.on && x.note == note && ! x.released) { v = &x; break; }       // the same pad again: start over
         if (v == nullptr) for (auto& x : vc) if (! x.on) { v = &x; break; }
         if (v == nullptr) for (auto& x : vc) if (v == nullptr || x.order < v->order) v = &x;
+        const double startStep = quantised (p);
+        if (p.latch)       // the pad is selected: the one that was playing gives way at the very step the new one starts
+            for (auto& x : vc) if (x.on && &x != v && ! x.released) { x.released = true; x.relStep = std::max (x.startStep, startStep); }
         *v = Vc{};
         v->on = true; v->note = note; v->vel = std::clamp (velocity, 0.05f, 1.f); v->order = ++order;
-        static const double q[4] = { 0.0, 4.0, 2.0, 1.0 };
-        const double qs = q[std::clamp (p.quant, 0, 3)];
-        v->startStep = qs > 0.0 ? std::ceil (curStep / qs - 1e-9) * qs : curStep;
-        v->relStep = 1e18;
+        v->startStep = startStep; v->relStep = 1e18; v->latched = p.latch;
     }
     void noteOff (int note)
     {
-        if (isGesture (keyOfNote (note))) { if (fill.on && fill.note == note) releaseFill(); return; }
-        for (auto& v : vc) if (v.on && v.note == note && ! v.released) { v.released = true; v.relStep = std::max (v.startStep, std::ceil (curStep - 1e-9)); }
+        if (isFillNote (note)) { if (fill.on && fill.note == note) releaseFill(); return; }
+        for (auto& v : vc)
+            if (v.on && v.note == note && ! v.released && ! v.latched) { v.released = true; v.relStep = std::max (v.startStep, std::ceil (curStep - 1e-9)); }
     }
     void allNotesOff()
     {
@@ -129,9 +146,10 @@ public:
                     const Ev& e = fill.ev[(size_t) fill.iEv++];
                     if (e.t < fill.end - 1e-9) trigger (maxVoices, fill.note, 1.f, e, e.t, stepSamples, tune, 1);
                 }
-                if (fill.started && fill.released && step >= fill.end - 1e-9)
+                if (fill.started && fill.released)             // the key is up: the playback is back at once
                 {
-                    if (fill.type == GestDrop && fill.accentSlice >= 0 && ! fill.accentDone)     // the drop ends with a hard hit
+                    for (auto& h : hit) if (h.on && h.owner == maxVoices && h.chokeLeft == 0) { h.chokeLeft = std::max (1, (int) (0.003 * sr)); h.chokeLen = h.chokeLeft; }
+                    if (fill.type == FillDrop && fill.accentSlice >= 0 && ! fill.accentDone)     // the drop ends with a hard hit
                     {
                         fill.accentDone = true;
                         const Ev e { step, fill.accentSlice, 1.3f * fill.vel, 1.f, 1.f, 0.f, 0.f, false, 3, 0 };
@@ -143,6 +161,7 @@ public:
             for (auto& v : vc)
             {
                 if (! v.on) continue;
+                if (v.latched && ! p.latch && ! v.released) { v.released = true; v.relStep = std::ceil (step - 1e-9); }   // Latch switched off: the pad plays only while held
                 if (step >= v.relStep) { v.on = false; continue; }
                 if (step < v.startStep) continue;
                 if (v.planned != absBar) { plan (v, absBar, p); v.planned = absBar; v.iEv = 0; while (v.iEv < v.nEv && (double) absBar * 16.0 + v.ev[(size_t) v.iEv].t < v.startStep - 1e-9) ++v.iEv; }
@@ -174,8 +193,8 @@ public:
         }
         dispPhase.store ((float) (std::fmod (curStep, loopBeats * 4.0) / (loopBeats * 4.0)));
         int mask = 0;
-        for (const auto& v : vc) if (v.on && curStep >= v.startStep) mask |= 1 << keyOfNote (v.note);
-        if (fill.on && fill.started) mask |= 1 << (KeyRollUp + fill.type);
+        for (const auto& v : vc) if (v.on && curStep >= v.startStep && ! v.released) mask |= 1 << whiteIndex (v.note);
+        if (fill.on && fill.started) mask |= 1 << (8 + fill.type);
         dispMask.store (mask);
     }
 
@@ -183,19 +202,18 @@ public:
     int hitCount() const { return count.load(); }
     int hitAt (int i) const { return ring[(size_t) (i % ringSize)].load(); }
     float loopPhase() const { return dispPhase.load(); }
-    int activeKeys() const { return dispMask.load(); }
+    int activeKeys() const { return dispMask.load(); }          // bits 0..6: playback pads, bits 8..14: fills
     int activeVoices() const { int n = 0; for (const auto& v : vc) if (v.on) ++n; return n; }
     bool gestureActive() const { return fill.on; }
     int activeHits() const { int n = 0; for (const auto& h : hit) if (h.on) ++n; return n; }
     int numLoopHits() const { return (int) hits.size(); }
 
 private:
-    enum Gest { GestRollUp = 0, GestRollDown, GestReverse, GestStop, GestDrop, numGests };
     struct LoopHit { int slice; float pos; };                // pos in steps (1/16 notes) from the start of the loop
     struct Ev { double t; int slice; float vel, r0, r1, len, pan; bool rev; int kind; int grp; };    // t in steps from the start of the bar; len in steps, 0 = natural
     struct Vc
     {
-        bool on = false, released = false;
+        bool on = false, released = false, latched = false;
         int note = 0, nEv = 0, iEv = 0;
         float vel = 0.f;
         double startStep = 0.0, relStep = 1e18;
@@ -219,6 +237,13 @@ private:
         Params p;
         std::array<Ev, 200> ev {};
     };
+
+    double quantised (const Params& p) const
+    {
+        static const double q[4] = { 0.0, 4.0, 2.0, 1.0 };
+        const double qs = q[std::clamp (p.quant, 0, 3)];
+        return qs > 0.0 ? std::ceil (curStep / qs - 1e-9) * qs : curStep;
+    }
 
     // the loop as a list of hits placed on the grid
     void build()
@@ -261,7 +286,8 @@ private:
     {
         gg::Rng r (mixHash ((uint32_t) p.seed, (uint32_t) v.note, (uint32_t) absBar, 77u) | 1u);
         for (int i = 0; i < 4; ++i) r.nextU32();
-        const bool isBreak = keyOfNote (v.note) == KeyBreak;
+        const int mode = whiteIndex (v.note);
+        const bool isBreak = mode == PlayBreak;
         const int loopBars = std::max (1, (int) std::lround (loopBeats / 4.0));
         const int lb = (int) (((absBar % loopBars) + loopBars) % loopBars);
         const int phrase = (int) (((absBar % 4) + 4) % 4);
@@ -287,6 +313,46 @@ private:
             add (e);
         }
         auto sortEvents = [&] { std::sort (v.ev.begin(), v.ev.begin() + n, [] (const Ev& a, const Ev& b) { return a.t < b.t; }); };
+        sortEvents();
+
+        // 1b. the character of the pad: a clear, recognisable thing done to the loop, as much of it as Mutate and the velocity say
+        const float sig = (mode == PlayOriginal || isBreak) ? 0.f : std::clamp (std::pow (mut, 0.8f) * (0.55f + 0.45f * v.vel) * 1.1f, 0.f, 1.f);
+        auto takes = [&] { return r.uni() < sig; };
+        auto yOf = [&] (const Ev& e) { return kit->slices[(size_t) e.slice].y; };
+        auto pickBand = [&] (float lo, float hi, int fallback)
+        {
+            int best = -1, seen = 0;
+            for (int i = 0; i < (int) kit->slices.size(); ++i)
+            {
+                const float y = kit->slices[(size_t) i].y;
+                if (y >= lo && y <= hi && ++seen && r.uni() < 1.f / (float) seen) best = i;
+            }
+            return best >= 0 ? best : fallback;
+        };
+        bool rolls = false;
+        switch (mode)
+        {
+            case PlayFlip:      for (int i = 0; i < n; ++i) { Ev& e = v.ev[(size_t) i]; if (((e.t >= 4.0 && e.t < 8.0) || e.t >= 12.0) && takes()) e.rev = true; } break;
+            case PlayRatchet:   rolls = true; break;
+            case PlaySwap:
+                for (int i = 0; i < n; ++i)
+                {
+                    Ev& e = v.ev[(size_t) i]; const float y = yOf (e);
+                    if (y < 0.2f) { if (takes()) e.slice = pickBand (0.3f, 0.8f, e.slice); }
+                    else if (y > 0.3f && y < 0.8f) { if (takes()) e.slice = pickBand (0.f, 0.2f, e.slice); }
+                }
+                break;
+            case PlayShove:     for (int i = 0; i < n; ++i) { Ev& e = v.ev[(size_t) i]; if (takes()) e.t = std::fmod (e.t + 2.0, 16.0); } break;
+            case PlayGhost:
+                for (int st = 0; st < 16; ++st)
+                {
+                    bool free = true;
+                    for (int i = 0; i < n; ++i) if (std::abs (v.ev[(size_t) i].t - (double) st) < 0.45) free = false;
+                    if (free && takes()) add ({ (double) st, pickBand (0.8f, 1.f, 0), 0.2f + 0.25f * r.uni(), 1.f, 1.f, 0.9f, 0.f, false, 2, 0 });
+                }
+                break;
+            default: break;      // Original (nothing) and Break (random damage, below)
+        }
         sortEvents();
         if (isBreak)
         {
@@ -327,11 +393,11 @@ private:
         int rollCounter = (int) ((absBar % 100000) * 100);
         std::array<Ev, 160> extra {}; int nx = 0;
         auto addX = [&] (const Ev& e) { if (nx < 160) extra[(size_t) nx++] = e; };
-        for (int i = 0; i < base && isBreak; ++i)
+        for (int i = 0; i < base && (isBreak || rolls); ++i)
         {
             Ev& e = v.ev[(size_t) i];
-            if (r.uni() < pRev) e.rev = true;
-            if (r.uni() < pPitch)
+            if (isBreak && r.uni() < pRev) e.rev = true;
+            if (isBreak && r.uni() < pPitch)
             {
                 static const float jump[6] = { 0.5f, 0.75f, 1.5f, 2.f, 0.5f, 1.335f };
                 e.r0 = jump[(int) (r.uni() * 6.f) % 6];
@@ -341,10 +407,11 @@ private:
             }
             // a roll: the hit repeats along the grid, the rate climbing or falling, with the pitch following
             const bool tonal = kit->slices[(size_t) e.slice].y > 0.15f;
-            if (r.uni() < pRamp * (tonal ? 1.f : 0.5f) && e.t < 15.0)
+            const bool ratchet = rolls && tonal && takes();
+            if ((ratchet || r.uni() < pRamp * (tonal ? 1.f : 0.5f)) && e.t < 15.0)
             {
-                const double span = std::min (rampAmt > 0.6f && r.uni() < 0.5f ? 6.0 : (D > 0.5f ? 4.0 : 3.0), 16.0 - e.t);
-                const bool up = r.uni() < 0.65f;
+                const double span = std::min (ratchet ? (kit->slices[(size_t) e.slice].y > 0.7f ? 2.0 : (rampAmt > 0.6f ? 4.0 : 3.0)) : (rampAmt > 0.6f && r.uni() < 0.5f ? 6.0 : (D > 0.5f ? 4.0 : 3.0)), 16.0 - e.t);
+                const bool up = ratchet || r.uni() < 0.65f;
                 const bool triplets = r.uni() < 0.2f * D;
                 double gaps[64];
                 const int ng = rollGaps (up, span, triplets, gaps, 64);
@@ -451,21 +518,18 @@ private:
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // the gestures: for as long as the key is held they take the place of the loop; let go and the loop is back, on the grid
+    // the fills: they take the place of the playback for exactly as long as the key is down, and give it back the moment it is up
     static double blockSteps (int type, int block)
     {
-        static const double first[numGests] = { 8, 8, 4, 6, 4 };       // the shortest a gesture lasts, even if the key is only tapped
-        static const double next[numGests]  = { 4, 4, 4, 4, 4 };       // then it goes on block after block while the key is down
-        return block == 0 ? first[type] : next[type];
+        static const double first[numFills] = { 8, 8, 4, 4, 6, 4, 4 };       // the plan of a first block (the key can be let go at any moment)
+        return block == 0 ? first[type] : 4.0;                                // and it goes on block after block while the key is down
     }
 
     void startFill (int type, int note, float vel, const Params& p)
     {
         fill = Fill{};
         fill.on = true; fill.type = type; fill.note = note; fill.p = p; fill.vel = std::clamp (vel, 0.4f, 1.f);
-        static const double q[4] = { 0.0, 4.0, 2.0, 1.0 };
-        const double qs = q[std::clamp (p.quant, 0, 3)];
-        fill.start = qs > 0.0 ? std::ceil (curStep / qs - 1e-9) * qs : curStep;
+        fill.start = quantised (p);
         fill.end = fill.nominalEnd = fill.start + blockSteps (type, 0);
         planFill (fill, p, fill.vel);
     }
@@ -477,11 +541,12 @@ private:
         fill.nEv = 0; fill.iEv = 0;
         planFill (fill, fill.p, fill.vel);
     }
-    void releaseFill()         // the key is let go: the gesture stops at the next step (never before its own first block is over)
+    void releaseFill()         // the key is let go: that is the end, now (a key let go before the fill began cancels it)
     {
         if (fill.released) return;
+        if (! fill.started && curStep < fill.start - 1e-9) { fill.on = false; return; }
         fill.released = true;
-        if (fill.block > 0) fill.end = std::max (fill.nominalEnd, std::max (fill.start, std::ceil (curStep - 1e-9)));
+        fill.end = std::min (fill.end, curStep);
     }
 
     void planFill (Fill& f, const Params& p, float vel)
@@ -519,7 +584,7 @@ private:
                 if (d >= 0.0 && d < span) fn (h, d);
             }
         };
-        const bool rollUp = f.type == GestRollUp, rollDown = f.type == GestRollDown;
+        const bool rollUp = f.type == FillRollUp, rollDown = f.type == FillRollDown;
         if ((rollUp || rollDown) && f.block == 0)
         {
             // a stutter-edit ramp: a snare hit repeated along the grid, 1/8 -> 1/64 (rising in pitch, swelling) or 1/64 -> 1/8 (sagging, fading)
@@ -540,19 +605,36 @@ private:
         else if ((rollUp || rollDown))        // held: it stays where the ramp ended (full speed and high, or slow and low and nearly gone)
         {
             const int s0 = pick (0.3f, 0.8f);
-            if (rollDown) { const float rr = std::exp2 (-9.f * amount / 12.f); for (int k = 0; k < 2; ++k) add (t0 + 2.0 * k, s0, 0.22f, rr, rr, (float) (2.0 * p.gate), false); }
+            if (rollDown) { const float rr = std::exp2 (-9.f * amount / 12.f); for (int k = 0; k < 2; ++k) add (t0 + 1.0 + 2.0 * k, s0, 0.22f, rr, rr, (float) (2.0 * p.gate), false); }   // (the ramp's last gap was 2 steps: the next one is 2 steps on)
             else { const float rr = std::exp2 (12.f * amount / 12.f); for (int k = 0; k < 16; ++k) add (t0 + 0.25 * k, s0, 1.15f, rr, rr, 0.25f * (float) p.gate, false); }
         }
-        else if (f.type == GestReverse)       // the beat before, in the opposite order, backwards (held: the one before that, and so on)
+        else if (f.type == FillStutter)       // the last hit, again and again
+        {
+            int last = -1; double best = 1e9;
+            hitsFrom (t0 - 16.0, 16.0, [&] (const LoopHit& h, double d) { const double behind = 16.0 - d; if (behind > 1e-9 && behind < best) { best = behind; last = h.slice; } });
+            if (last < 0) last = pick (0.f, 1.f);
+            if (f.block == 0)
+            {
+                double t = 0.0; int rep = 0;
+                while (t < 4.0 - 1e-6 && rep < 20) { const double gap = rep < 2 ? 1.0 : 0.5; add (t0 + t, last, 1.f - 0.06f * (float) rep, 1.f, 1.f, (float) (gap * p.gate), false); t += gap; ++rep; }
+            }
+            else for (int k = 0; k < 8; ++k) add (t0 + 0.5 * k, last, 0.85f, 1.f, 1.f, 0.5f * (float) p.gate, false);      // held: at the fast rate
+        }
+        else if (f.type == FillHats)          // a flurry of hats
+        {
+            const int hat = pick (0.8f, 1.f);
+            for (int k = 0; k < 8; ++k) add (t0 + 0.5 * k, hat, (k % 2 ? 0.6f : 1.f) * (0.55f + 0.45f * (float) k / 7.f), k == 7 ? 1.19f : 1.f, 1.f, 0.45f, false);
+        }
+        else if (f.type == FillReverse)       // the beat before, in the opposite order, backwards (held: the one before that, and so on)
         {
             hitsFrom (t0 - 4.0, 4.0, [&] (const LoopHit& h, double d) { add (std::min (t0 + 4.0 - d, t0 + 3.75), h.slice, 0.95f, 1.f, 1.f, 0.f, true); });
         }
-        else if (f.type == GestStop)          // tape stop: the loop goes on, slower and lower, and stops (held: it stays stopped)
+        else if (f.type == FillStop)          // tape stop: the loop goes on, slower and lower, and stops (held: it stays stopped)
         {
             if (f.block == 0)
                 hitsFrom (t0, 6.0, [&] (const LoopHit& h, double d) { const float prog = (float) (d / 6.0); const float r0 = 1.f - 0.8f * prog; add (t0 + d, h.slice, 1.f - 0.3f * prog, r0, r0 * 0.55f, 0.f, false); });
         }
-        else if (f.type == GestDrop)          // nothing; the hard return comes when the key is let go
+        else if (f.type == FillDrop)          // nothing; the hard return comes when the key is let go
         {
             if (f.block == 0) f.accentSlice = pick (0.f, 0.2f);
         }

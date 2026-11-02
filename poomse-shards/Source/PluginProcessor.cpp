@@ -6,8 +6,8 @@ namespace
 {
 using Range = juce::NormalisableRange<float>;
 // index into raw[]: the order of the parameters below
-enum { pMutate, pRamp, pGroove, pTune, pQuant, pBars, pLevel, pSeed, numRaw };
-const char* const kIds[numRaw] = { "mutate", "ramp", "groove", "tune", "quant", "bars", "level", "seed" };
+enum { pMutate, pRamp, pGroove, pTune, pQuant, pBars, pLevel, pSeed, pLatch, numRaw };
+const char* const kIds[numRaw] = { "mutate", "ramp", "groove", "tune", "quant", "bars", "level", "seed", "latch" };
 
 struct PresetParam { const char* id; float value; };
 struct Preset { const char* name; std::vector<PresetParam> params; };
@@ -42,7 +42,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseShardsProcessor::creat
     auto attr = [] (auto fn) { return juce::AudioParameterFloatAttributes().withStringFromValueFunction (fn); };
     auto pct = [] (float x, int) { return juce::String (juce::roundToInt (x * 100.f)) + " %"; };
 
-    l.add (std::make_unique<F> (id ("mutate"),  "Mutate",  Range (0.f, 1.f, 0.001f), 0.45f, attr (pct)));
+    l.add (std::make_unique<F> (id ("mutate"),  "Mutate",  Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
     l.add (std::make_unique<F> (id ("ramp"),    "Ramp",    Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
     l.add (std::make_unique<F> (id ("groove"),  "Groove",  Range (0.f, 1.f, 0.001f), 1.f, attr (pct)));
     l.add (std::make_unique<F> (id ("tune"),    "Tune",    Range (-12.f, 12.f, 0.01f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " st"; })));
@@ -50,6 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseShardsProcessor::creat
     l.add (std::make_unique<juce::AudioParameterChoice> (id ("bars"), "Loop length", juce::StringArray { "1 bar", "2 bars", "4 bars", "8 bars" }, 1));
     l.add (std::make_unique<F> (id ("level"),   "Level",   Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
     l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version", 1, 999, 1));
+    l.add (std::make_unique<juce::AudioParameterBool> (id ("latch"), "Latch", true));
     return l;
 }
 
@@ -68,7 +69,7 @@ sh::Params PoomseShardsProcessor::readParams() const
 {
     sh::Params p;
     p.mutate = raw[pMutate]->load(); p.ramp = raw[pRamp]->load();   p.groove = raw[pGroove]->load(); p.tune = raw[pTune]->load();
-    p.quant = (int) raw[pQuant]->load(); p.seed = (int) raw[pSeed]->load();
+    p.quant = (int) raw[pQuant]->load(); p.seed = (int) raw[pSeed]->load(); p.latch = raw[pLatch]->load() > 0.5f;
     return p;
 }
 
@@ -131,17 +132,18 @@ juce::String PoomseShardsProcessor::getBreakName() const
     return path.isNotEmpty() ? juce::File (path).getFileName() : juce::String ("boom, tchak, a hat in the air (built in)");
 }
 
-bool PoomseShardsProcessor::loadBreak (const juce::File& file)
+juce::Result PoomseShardsProcessor::loadBreak (const juce::File& file)
 {
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
-    if (reader == nullptr || reader->lengthInSamples < 4096 || reader->sampleRate <= 0.0) return false;
+    if (reader == nullptr) return juce::Result::fail ("CANNOT READ " + file.getFileName().toUpperCase() + " (NOT AN AUDIO FILE THIS PLUGIN KNOWS)");
+    if (reader->sampleRate <= 0.0 || reader->lengthInSamples < 4096) return juce::Result::fail (file.getFileName().toUpperCase() + " IS TOO SHORT");
 
     const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
     juce::AudioBuffer<float> tmp (2, len);
     tmp.clear();
-    if (! reader->read (&tmp, 0, len, 0, true, true)) return false;
+    if (! reader->read (&tmp, 0, len, 0, true, true)) return juce::Result::fail ("COULD NOT READ THE AUDIO IN " + file.getFileName().toUpperCase());
 
     auto k = std::make_shared<sh::Kit>();
     k->sampleRate = reader->sampleRate;
@@ -154,7 +156,7 @@ bool PoomseShardsProcessor::loadBreak (const juce::File& file)
     while (end > 1000 && std::abs (k->x[(size_t) end - 1]) < 0.002f) --end;
     k->x.resize ((size_t) end);
     k->analyse();                       // cut the break into its hits
-    if (k->slices.empty()) return false;
+    if (k->slices.empty()) return juce::Result::fail (file.getFileName().toUpperCase() + " IS SILENT");
 
     // guess how many bars it is: the tempo that comes out should be one a person would play
     const double seconds = (double) k->x.size() / k->sampleRate;
@@ -168,7 +170,7 @@ bool PoomseShardsProcessor::loadBreak (const juce::File& file)
     if (auto* p = apvts.getParameter ("bars")) p->setValueNotifyingHost (p->convertTo0to1 ((float) best));
     apvts.state.setProperty ("break", file.getFullPathName(), nullptr);
     publish (std::move (k));
-    return true;
+    return juce::Result::ok();
 }
 
 void PoomseShardsProcessor::uiNote (int note, bool on)
@@ -309,7 +311,7 @@ void PoomseShardsProcessor::setStateInformation (const void* data, int size)
             if (path.isNotEmpty() && juce::File (path).existsAsFile())
             {
                 const float savedBars = raw[pBars]->load();               // the saved length wins over the guess
-                if (loadBreak (juce::File (path)))
+                if (loadBreak (juce::File (path)).wasOk())
                 {
                     if (auto* p = apvts.getParameter ("bars")) p->setValueNotifyingHost (p->convertTo0to1 (savedBars));
                     return;

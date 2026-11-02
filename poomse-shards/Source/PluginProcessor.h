@@ -32,7 +32,7 @@ public:
     void setStateInformation (const void*, int) override;
 
     // ---- message thread ----
-    bool loadBreak (const juce::File& file);
+    juce::Result loadBreak (const juce::File& file);              // ok, or the reason it did not work
     void useBuiltInBreak();
     juce::String getBreakName() const;
 

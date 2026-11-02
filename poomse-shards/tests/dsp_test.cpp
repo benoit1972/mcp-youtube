@@ -5,13 +5,15 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <tuple>
 
 static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf ("FAIL: %s (line %d)\n", #c, __LINE__); ++failures; } } while (0)
 
 static const double kSr = 48000.0;
-// the seven keys, on the white keys of the octave starting at C3 (MIDI 60)
-static const int kLoop = 60, kBreak = 62, kRollUp = 64, kRollDown = 65, kReverse = 67, kStop = 69, kDrop = 71;
+// the playback pads: the white keys from C3 (MIDI 60); the fills: the white keys from C1 (MIDI 36)
+static const int kLoop = 60, kBreak = 62, kRatchet = 64, kFlip = 65, kSwap = 67, kShove = 69, kGhost = 71;
+static const int fRollUp = 36, fRollDown = 38, fStutter = 40, fReverse = 41, fStop = 43, fHats = 45, fDrop = 47;
 
 struct Run
 {
@@ -23,7 +25,7 @@ struct Run
     explicit Run (const sh::Kit* kit, double loopBeats = 8.0)
     {
         e.prepare (kSr); e.setLoopBeats (loopBeats); e.setKit (kit); e.setLog (&log);
-        p.quant = 0; p.groove = 1.f;
+        p.quant = 0; p.groove = 1.f; p.latch = false;
     }
     double step() const { return beat * 4.0; }
     void go (double seconds, bool playing = true)
@@ -105,10 +107,13 @@ int main()
     {
         int expect[12] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
         bool ok = true;
-        for (int oct = 0; oct < 9; ++oct) for (int i = 0; i < 12; ++i) ok = ok && sh::keyOfNote (oct * 12 + i) == expect[i];
+        for (int oct = 0; oct < 9; ++oct) for (int i = 0; i < 12; ++i) ok = ok && sh::whiteIndex (oct * 12 + i) == expect[i];
         CHECK (ok);
-        CHECK (sh::keyOfNote (kLoop) == sh::KeyLoop && sh::keyOfNote (kBreak) == sh::KeyBreak && sh::keyOfNote (kRollUp) == sh::KeyRollUp && sh::keyOfNote (kRollDown) == sh::KeyRollDown
-               && sh::keyOfNote (kReverse) == sh::KeyReverse && sh::keyOfNote (kStop) == sh::KeyStop && sh::keyOfNote (kDrop) == sh::KeyDrop);
+        CHECK (sh::isFillNote (36) && sh::isFillNote (47) && ! sh::isFillNote (48) && ! sh::isFillNote (60));
+        CHECK (sh::whiteIndex (kLoop) == sh::PlayOriginal && sh::whiteIndex (kBreak) == sh::PlayBreak && sh::whiteIndex (kRatchet) == sh::PlayRatchet && sh::whiteIndex (kFlip) == sh::PlayFlip
+               && sh::whiteIndex (kSwap) == sh::PlaySwap && sh::whiteIndex (kShove) == sh::PlayShove && sh::whiteIndex (kGhost) == sh::PlayGhost);
+        CHECK (sh::whiteIndex (fRollUp) == sh::FillRollUp && sh::whiteIndex (fRollDown) == sh::FillRollDown && sh::whiteIndex (fStutter) == sh::FillStutter && sh::whiteIndex (fReverse) == sh::FillReverse
+               && sh::whiteIndex (fStop) == sh::FillStop && sh::whiteIndex (fHats) == sh::FillHats && sh::whiteIndex (fDrop) == sh::FillDrop);
     }
     // ---- LOOP: the loop untouched, whatever the knobs say ----
     std::vector<float> loopAudio;
@@ -245,84 +250,141 @@ int main()
         CHECK (many.e.activeHits() == 0);
     }
 
-    // ---- the five gestures ----
-    // A Loop key is held; a gesture is played on top of it. For each: it takes the floor (no loop hit inside its window), stays on the grid,
-    // lasts as long as the key is held, and gives the loop back.
-    struct G { int note; const char* name; double nominal; };
-    const G gestures[5] = { { kRollUp, "Roll up", 8 }, { kRollDown, "Roll down", 8 }, { kReverse, "Reverse", 4 }, { kStop, "Stop", 6 }, { kDrop, "Drop", 4 } };
-    for (const auto& g : gestures)
+    // ---- the pads of the playback zone: each one a clear character ----
     {
-        for (int mode = 0; mode < 2; ++mode)               // 0: a tap, 1: held for 20 steps
+        auto run = [&] (int note, float mutate)
         {
-            Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.p.groove = 0.f;
+            auto r = std::make_unique<Run> (&kit); r->p.mutate = mutate; r->p.groove = 0.f;
+            r->e.noteOn (note, 0.95f, r->p); r->steps (8 * 16);
+            return r;
+        };
+        // Flip: beats 2 and 4 backwards, nothing else
+        {   auto r = run (kFlip, 1.f); int in = 0, inRev = 0, out = 0, outRev = 0;
+            for (const auto& l : r->log) { const double t = std::fmod (l.step, 16.0); const bool b24 = (t >= 4.0 && t < 8.0) || t >= 12.0; (b24 ? in : out)++; if (l.rev) (b24 ? inRev : outRev)++; }
+            std::printf ("FLIP: %d of %d hits on beats 2 and 4 are backwards, %d of %d elsewhere\n", inRev, in, outRev, out);
+            CHECK (in > 0 && inRev == in && outRev == 0); }
+        // Swap: the kicks and the snares trade places
+        {   auto base = run (kLoop, 1.f); auto r = run (kSwap, 1.f); int kicksNow = 0, nKick = 0, snaresNow = 0, nSnare = 0;
+            for (size_t i = 0; i < r->log.size() && i < base->log.size(); ++i)
+            {
+                const float y0 = kit.slices[(size_t) base->log[i].slice].y, y1 = kit.slices[(size_t) r->log[i].slice].y;
+                if (y0 < 0.2f) { ++nKick; if (y1 > 0.3f && y1 < 0.8f) ++kicksNow; }
+                else if (y0 > 0.3f && y0 < 0.8f) { ++nSnare; if (y1 < 0.2f) ++snaresNow; }
+            }
+            std::printf ("SWAP: %d of %d kicks now sound as snares, %d of %d snares as kicks\n", kicksNow, nKick, snaresNow, nSnare);
+            CHECK (nKick > 0 && nSnare > 0 && kicksNow == nKick && snaresNow == nSnare); }
+        // Shove: everything an eighth note late
+        {   auto base = run (kLoop, 1.f); auto r = run (kShove, 1.f); std::multiset<long> a, b;
+            for (const auto& l : base->log) a.insert (std::lround (std::fmod (std::fmod (l.step, 16.0) + 2.0, 16.0) * 4.0));
+            for (const auto& l : r->log) b.insert (std::lround (std::fmod (l.step, 16.0) * 4.0));
+            CHECK (a == b); }
+        // Ratchet: the snares and the hats turn into rolls
+        {   auto r = run (kRatchet, 1.f); int rolls = 0, total = 0; for (const auto& l : r->log) { ++total; if (l.kind == 1) ++rolls; }
+            std::printf ("RATCHET: %d of %d hits are part of a roll\n", rolls, total);
+            CHECK (rolls > total / 2); }
+        // Ghost: soft hits in the gaps
+        {   auto r = run (kGhost, 1.f); int ghosts = 0, loopHits = 0; for (const auto& l : r->log) { if (l.kind == 2) { ++ghosts; CHECK (l.vel < 0.5f); } else ++loopHits; }
+            std::printf ("GHOST: %d ghost hits added to %d hits of the loop\n", ghosts, loopHits);
+            CHECK (ghosts >= loopHits / 2 && ghosts >= 40); }
+        // Mutate: it says how much of the loop the pad takes hold of
+        {   auto lo = run (kFlip, 0.15f), hi = run (kFlip, 1.f); int a = 0, b = 0; for (const auto& l : lo->log) a += l.rev; for (const auto& l : hi->log) b += l.rev;
+            std::printf ("FLIP backwards hits: Mutate 0.15 -> %d, Mutate 1 -> %d\n", a, b);
+            CHECK (a < b / 2 + 1 && b > 0); }
+    }
+    // ---- Latch: the pad stays selected ----
+    {
+        Run r (&kit); r.p.latch = true; r.p.mutate = 0.5f;
+        r.e.noteOn (kLoop, 0.8f, r.p); r.steps (16);
+        r.e.noteOff (kLoop);                                    // let go: it keeps playing
+        const size_t mark = r.log.size(); r.steps (32);
+        CHECK (r.log.size() - mark >= 10);
+        r.e.noteOn (kFlip, 0.9f, r.p);                          // another pad: the first gives way at once
+        const double switchStep = r.step(); r.steps (32);
+        bool onlyFlip = true; int flips = 0;
+        for (const auto& l : r.log) if (l.step >= switchStep + 1.5) { if (l.note != kFlip) onlyFlip = false; else ++flips; }
+        std::printf ("Latch: after another pad is chosen, %d hits, all from the new pad: %s\n", flips, onlyFlip ? "yes" : "NO");
+        CHECK (onlyFlip && flips >= 10);
+        Run q (&kit); q.p.latch = false; q.e.noteOn (kLoop, 0.8f, q.p); q.steps (16); q.e.noteOff (kLoop); q.steps (2);
+        const size_t m2 = q.log.size(); q.steps (32);
+        CHECK (q.log.size() == m2);                             // without Latch it stops when the key does
+    }
+    // ---- the fills: they last exactly as long as the key is down ----
+    struct F { int note; const char* name; };
+    const F fills[7] = { { fRollUp, "Roll up" }, { fRollDown, "Roll down" }, { fStutter, "Stutter" }, { fReverse, "Reverse" }, { fStop, "Stop" }, { fHats, "Hats" }, { fDrop, "Drop" } };
+    for (const auto& f : fills)
+        for (double held : { 1.5, 6.0, 20.0 })
+        {
+            Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.p.groove = 0.f; r.p.latch = true;
             r.steps (0.1);
             r.e.noteOn (kLoop, 0.8f, r.p);
             r.steps (3 * 16 + 0.05);
             r.log.clear();
-            r.e.noteOn (g.note, 0.9f, r.p);
-            const double pressed = r.step(), start = std::ceil (pressed - 1e-9);
-            double held = mode == 0 ? 0.0 : 20.0;
+            r.e.noteOn (f.note, 0.9f, r.p);
+            const double start = std::ceil (r.step() - 1e-9);
             r.steps (held);
-            r.e.noteOff (g.note);
+            r.e.noteOff (f.note);
             const double released = r.step();
-            r.steps (g.nominal + 10.0);
-            const double end = mode == 0 ? start + g.nominal : std::max (start + g.nominal, std::ceil (released - 1e-9));
-            int nG = 0, loopInside = 0; bool grid = true; double firstG = 1e9, lastG = -1e9; int loopAfter = 0;
-            double accentAt = -1.0;
+            r.steps (24);
+            int nF = 0, loopInside = 0, loopAfter = 0; bool grid = true; double lastF = -1.0, firstLoopAfter = 1e9;
             for (const auto& l : r.log)
             {
-                if (l.note == g.note)
-                {
-                    ++nG; firstG = std::min (firstG, l.step); lastG = std::max (lastG, l.step);
-                    if (! onGrid (l.step)) grid = false;
-                    if (g.note == kDrop) accentAt = l.step;
-                }
-                else if (l.step >= start + 1e-9 && l.step < end - 1e-9) ++loopInside;
-                else if (l.step >= end - 1e-9) ++loopAfter;
+                if (l.note == f.note) { ++nF; lastF = std::max (lastF, l.step); if (! onGrid (l.step)) grid = false; }
+                else if (l.step >= start + 1e-9 && l.step < released - 0.02) ++loopInside;
+                else if (l.step >= released - 0.02) { ++loopAfter; firstLoopAfter = std::min (firstLoopAfter, l.step); }
             }
-            std::printf ("%-9s %s: %3d events, from step %.1f to %.1f (window %.0f to %.0f), %d loop hits inside, %d after\n", g.name, mode ? "held " : "tapped", nG, firstG - start, lastG - start, 0.0, end - start, loopInside, loopAfter);
-            CHECK (grid && loopInside == 0 && loopAfter > 0);
+            std::printf ("%-9s held %4.1f steps: %3d events, last at +%.2f after the key went up, %d loop hits inside, first loop hit back %.2f after\n", f.name, held, nF, lastF - released, loopInside, firstLoopAfter - released);
+            CHECK ((grid || f.note == fDrop) && loopInside == 0 && loopAfter > 0);     // (the hard hit of the Drop falls when the key goes up)
             CHECK (peakOf (r.out) <= 1.0f);
-            if (g.note == kDrop) CHECK (nG == 1 && std::abs (accentAt - end) < 0.51);        // one hard hit, as the key is let go
-            else CHECK (nG >= 1 && firstG >= start - 1e-6 && lastG <= end + 1e-6);
-            if (mode == 1 && g.note != kDrop && g.note != kStop) CHECK (lastG > start + g.nominal + 4.0);   // it went on beyond its first block
-            if (g.note == kDrop && mode == 1) CHECK (accentAt >= start + 20.0 - 0.01);
+            if (f.note == fDrop) { CHECK (nF == 1 && std::abs (lastF - released) < 0.02); }     // one hard hit, at the very moment the key goes up
+            else { CHECK ((nF >= 1 || held < 5.0) && lastF <= released + 1e-6); }                  // nothing after the key is up
+            CHECK (firstLoopAfter - released < 8.0);                                               // and the playback is back
+            if (held >= 20.0 && f.note != fDrop && f.note != fStop) CHECK (lastF > start + 12.0);   // held: it went on
         }
+    {   // a key let go before the fill had even begun cancels it
+        Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.beat = 0.3;
+        r.steps (0.1);
+        r.e.noteOn (fHats, 0.9f, r.p);
+        r.e.noteOff (fHats);
+        r.steps (16);
+        int nF = 0; for (const auto& l : r.log) if (l.note == fHats) ++nF;
+        CHECK (nF == 0);
     }
     {   // what each one is
         auto run = [&] (int note, double held)
         {
-            auto r = std::make_unique<Run> (&kit); r->p.mutate = 0.f; r->p.quant = 3; r->p.groove = 0.f; r->p.ramp = 1.f;
+            auto r = std::make_unique<Run> (&kit); r->p.mutate = 0.f; r->p.quant = 3; r->p.groove = 0.f; r->p.ramp = 1.f; r->p.latch = true;
             r->steps (0.1); r->e.noteOn (kLoop, 0.8f, r->p); r->steps (3 * 16 + 0.05); r->log.clear();
             r->e.noteOn (note, 0.9f, r->p); r->steps (held); r->e.noteOff (note); r->steps (14);
             std::vector<sh::EventLog> v; for (const auto& l : r->log) if (l.note == note) v.push_back (l);
             return v;
         };
-        {   auto v = run (kRollUp, 0.0);     // climbing: faster, higher, louder
+        {   auto v = run (fRollUp, 9.0);     // climbing: faster, higher, louder
             bool gaps = v.size() >= 8, pitch = true;
             for (size_t i = 2; i < v.size(); ++i) { gaps = gaps && v[i].step - v[i - 1].step <= v[i - 1].step - v[i - 2].step + 1e-6; pitch = pitch && v[i].r0 >= v[i - 1].r0 - 1e-5f; }
             std::printf ("Roll up: %zu repeats, pitch from %.2f to %.2f, level from %.2f to %.2f\n", v.size(), v.front().r0, v.back().r0, v.front().vel, v.back().vel);
             CHECK (gaps && pitch && v.back().vel > v.front().vel * 2.f && v.back().r0 > 1.5f);
-            auto h = run (kRollUp, 20.0);    // held: it stays at full speed, high
+            auto h = run (fRollUp, 20.0);    // held: it stays at full speed, high
             CHECK (h.size() > v.size() + 20);
             CHECK (std::abs ((h.back().step - h[h.size() - 2].step) - 0.25) < 1e-6 && h.back().r0 > 1.5f);
         }
-        {   auto v = run (kRollDown, 0.0);   // stretching: slower, lower, quieter
+        {   auto v = run (fRollDown, 9.0);   // stretching: slower, lower, quieter
             bool gaps = v.size() >= 8, pitch = true;
             for (size_t i = 2; i < v.size(); ++i) { gaps = gaps && v[i].step - v[i - 1].step >= v[i - 1].step - v[i - 2].step - 1e-6; pitch = pitch && v[i].r0 <= v[i - 1].r0 + 1e-5f; }
             std::printf ("Roll down: %zu repeats, pitch from %.2f to %.2f, level from %.2f to %.2f, last gap %.2f steps\n", v.size(), v.front().r0, v.back().r0, v.front().vel, v.back().vel, v.back().step - v[v.size() - 2].step);
             CHECK (gaps && pitch && v.back().vel < v.front().vel * 0.5f && v.back().r0 < 0.8f);
             CHECK (v.back().step - v[v.size() - 2].step >= 1.0);                  // the last repeats are drawn out
         }
-        {   auto v = run (kReverse, 0.0); bool allRev = ! v.empty(); for (const auto& l : v) allRev = allRev && l.rev; CHECK (allRev); }
-        {   auto v = run (kStop, 0.0); bool falling = v.size() >= 2; for (size_t i = 1; i < v.size(); ++i) falling = falling && v[i].r0 < v[i - 1].r0 + 1e-6f; CHECK (falling && v.back().r0 < 0.7f); }
+        {   auto v = run (fStutter, 4.0); bool same = v.size() >= 4; for (const auto& l : v) same = same && l.slice == v[0].slice; CHECK (same); }
+        {   auto v = run (fReverse, 4.0); bool allRev = ! v.empty(); for (const auto& l : v) allRev = allRev && l.rev; CHECK (allRev); }
+        {   auto v = run (fStop, 7.0); bool falling = v.size() >= 2; for (size_t i = 1; i < v.size(); ++i) falling = falling && v[i].r0 < v[i - 1].r0 + 1e-6f; CHECK (falling && v.back().r0 < 0.7f); }
+        {   auto v = run (fHats, 4.0); bool hats = v.size() >= 6; for (const auto& l : v) hats = hats && kit.slices[(size_t) l.slice].y > 0.7f; CHECK (hats); }
         {   // Drop is silent while it is held, and the hit that ends it is hard
             auto measure = [&] (bool drop)
             {
                 Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.steps (0.1);
                 r.e.noteOn (kLoop, 0.8f, r.p); r.steps (3 * 16 + 0.05);
                 const size_t n0 = r.out.size();
-                if (drop) r.e.noteOn (kDrop, 0.9f, r.p);
+                if (drop) r.e.noteOn (fDrop, 0.9f, r.p);
                 r.steps (12);
                 return rms (r.out, (double) n0 / kSr + 2.0 * secPerStep, (double) n0 / kSr + 11.0 * secPerStep);
             };

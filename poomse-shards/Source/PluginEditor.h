@@ -10,8 +10,8 @@ class BreakView : public juce::Component, private juce::Timer
 public:
     explicit BreakView (PoomseShardsProcessor&);
     void paint (juce::Graphics&) override;
-    void showMessage (const juce::String& m) { message = m; messageTicks = 120; }
-    void setDropHover (bool on) { dropHover = on; repaint(); }
+    void showMessage (const juce::String& m, int seconds = 5) { message = m; messageTicks = 30 * seconds; repaint(); }
+    void setDropHover (bool on, const juce::String& fileName = {}) { dropHover = on; dropName = fileName; repaint(); }
 
 private:
     void timerCallback() override;
@@ -22,7 +22,7 @@ private:
     PoomseShardsProcessor& proc;
     PoomseShardsProcessor::View view;
     int seenVersion = -1, hitsSeen = 0, messageTicks = 0;
-    juce::String name, message;
+    juce::String name, message, dropName;
     bool dropHover = false;
     std::vector<float> glow, glowRoll, glowRev, glowGhost;
 };
@@ -31,8 +31,8 @@ private:
 class PadButton : public juce::Component
 {
 public:
-    PadButton (PoomseShardsProcessor& p, int keyIndex, int noteNumber, juce::String text, juce::String sub, juce::String tag)
-        : proc (p), key (keyIndex), note (noteNumber), label (std::move (text)), noteName (std::move (sub)), tagline (std::move (tag)) {}
+    PadButton (PoomseShardsProcessor& p, int helpIndex, int noteNumber, juce::String text, juce::String sub, juce::String tag, bool fillPad)
+        : proc (p), key (helpIndex), note (noteNumber), label (std::move (text)), noteName (std::move (sub)), tagline (std::move (tag)), isFill (fillPad) {}
     void setLit (bool on) { if (on != lit) { lit = on; repaint(); } }
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override { down = true; proc.uiNote (note, true); repaint(); }
@@ -45,7 +45,7 @@ private:
     PoomseShardsProcessor& proc;
     int key, note;
     juce::String label, noteName, tagline;
-    bool lit = false, down = false, hover = false;
+    bool isFill = false, lit = false, down = false, hover = false;
 };
 
 class PoomseShardsEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer
@@ -57,7 +57,7 @@ public:
     void resized() override;
     // a sound dropped anywhere on the window is taken
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void fileDragEnter (const juce::StringArray&, int, int) override { breakView.setDropHover (true); }
+    void fileDragEnter (const juce::StringArray& files, int, int) override { breakView.setDropHover (true, files.isEmpty() ? juce::String() : juce::File (files[0]).getFileName()); }
     void fileDragExit (const juce::StringArray&) override { breakView.setDropHover (false); }
     void filesDropped (const juce::StringArray& files, int, int) override;
 
@@ -78,11 +78,11 @@ private:
     PoomseShardsProcessor& proc;
     BreakView breakView;
     juce::OwnedArray<Knob> knobs;
-    juce::OwnedArray<PadButton> pads;
-    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, rerollButton { "Reroll" }, loadButton { "Load" };
+    juce::OwnedArray<PadButton> pads, fillPads;
+    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, rerollButton { "Reroll" }, latchButton { "Latch" };
     juce::TextButton prevPreset { "<" }, nextPreset { ">" };
     juce::ComboBox presetBox;
-    std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> latchAttachment;
     juce::String helpText;
     int shownSeed = -1;
     bool resetArmed = false;
