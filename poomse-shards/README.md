@@ -1,26 +1,38 @@
 # Poomse Shards
 
-Un instrument Audio Unit de batterie pour le style de **Telefon Tel Aviv** : une boucle qui se défait en jouant, des rafales à la Stutter Edit, des coups retournés, plies, décalés, des fantômes, des fills, le tout **toujours sur la grille** du morceau.
+Un instrument Audio Unit de batterie pour le style de **Telefon Tel Aviv** : une boucle qui se défait en jouant, des rampes de répétition à la Stutter Edit (la cadence monte dans la grille, la hauteur monte, ça gonfle ; ou ça s'étire, ralentit et s'éteint), le tout **toujours sur la grille** du morceau.
 
-Ce n'est pas un beat repeat. **Une touche joue la boucle**, et la boucle est réécrite à chaque mesure : plus ou moins détruite, jamais déplacée hors du rythme.
+## Comment s'en servir
+Tu glisses une boucle de batterie sur la fenêtre (ou « Load »), ou tu gardes celle fournie : un « poum, chak » avec une charley en l'air. Le transport de Live doit tourner.
 
-## Le principe
-Tu glisses une boucle de batterie (ou tu gardes celle fournie : un « poum, chak » avec une charley en l'air). Le plugin la découpe à chaque attaque et la joue calée sur le tempo de Live. **Maintiens une touche** : la boucle joue. Chaque touche est une personnalité différente, et **on peut en tenir plusieurs à la fois** (plusieurs versions de la boucle les unes sur les autres).
+**Tiens un C pour toute la durée du clip : la boucle joue.** Pose ensuite les autres touches par-dessus : elles prennent le dessus **tant qu'elles sont enfoncées**, puis la boucle revient, pile sur la grille.
 
-Les changements sont **écrits, pas tirés au hasard** : la même mesure d'un même morceau se défait toujours de la même façon, et chaque mesure est différente de la précédente. « New edits » change de graine.
+| Touche | Nom | Ce que ça fait |
+|---|---|---|
+| C | **Loop** | la boucle exactement telle qu'elle est |
+| D | **Break** | la boucle défaite, mesure après mesure : coups échangés, décalés, à l'envers, fantômes, rolls, un fill en fin de phrase. **Mutate** dit jusqu'où |
+| E | **Roll up** | la rampe de Stutter Edit : la cadence monte (1/8 → 1/64), la hauteur monte, le niveau gonfle. Tenu : reste à pleine vitesse |
+| F | **Roll down** | la rampe qui s'étire : de plus en plus lent, de plus en plus grave, ça s'éteint |
+| G | **Reverse** | le temps qui vient de passer, à l'envers, encore et encore |
+| A | **Stop** | la boucle ralentit et s'arrête comme une bande. Tenu : reste arrêtée |
+| B | **Drop** | silence tant que la touche est tenue ; quand tu la lâches, la boucle revient avec un coup dur |
 
-## N'importe quel son
-Glisse un fichier audio sur la carte : une boucle de batterie, mais aussi un piano, une voix, un sample de synthé, un field recording. Le plugin coupe le son à chaque attaque ; **s'il n'y en a pas** (une nappe, une voix tenue), il le découpe en 16 morceaux réguliers, et tout fonctionne de la même façon. La longueur de la boucle (1, 2, 4 ou 8 mesures) est devinée à partir de la durée du fichier ; corrige-la avec « Loop length » si besoin. Les sons rythmiques, dont les attaques sont nettes, donnent les meilleurs résultats.
-
-## Les touches
-**C3 à B3 : 12 personnalités** (pads du milieu) : Loop (quasi fidèle), Flip (à l'envers), Ratchet (roulements), Swap (les coups changent de place), Hollow (trous et rentrées), Bend (hauteurs, tape stop), Shove (décalages), Ghost (coups fantômes), Mirror (le temps à rebours), Storm (tout à la fois), Stretch (coups lents, étirés), Drift (calme au début de la mesure, sauvage à la fin).
-La vélocité accentue ou adoucit l'effet.
-
-**C1 à B1 : 12 fills** (pads du haut). Un fill prend la place de la boucle pendant un ou deux temps, puis la rend : Roll, Big roll (roulement qui accélère et enfle), Roll down (qui ralentit), Hats (rafale de charleys), Triplets (triolets de grosse caisse), Rewind (le dernier temps à l'envers), Stop (tape stop), Drop (silence puis retour en force), Stutter (le dernier coup répété), Double (la boucle doublée en décalé), Cascade (un coup qui dégringole), Scatter (éclats pris partout).
+Chaque touche noire fait comme la touche blanche juste en dessous, à toutes les octaves. On peut tenir plusieurs touches de boucle en même temps (Loop + Break = deux boucles superposées).
 
 ## Les réglages
-**Ce qui est abîmé** : Mutate (jusqu'où ; le bas du potard donne de toutes petites retouches, le haut une autre boucle), Shuffle (coups échangés, décalés, miroir), Reverse (coups à l'envers), Ramp (rampes de répétition à la Stutter Edit : positif, la cadence monte dans la grille et enfle ; négatif, elle descend et s'éteint), Pitch (sauts de hauteur, glissandos, tape stop), Ghosts (coups fantômes dans les creux), Holes (trous, puis rentrée plus forte).
-**La boucle** : Groove (1 : les coups gardent leur feeling ; 0 : tout est calé sur la grille), Gate (longueur des répétitions), Tune, Start on (les notes démarrent à la prochaine : tout de suite, 1/4, 1/8, 1/16), Loop length (1, 2, 4 ou 8 mesures ; deviné au chargement), Level.
+| | |
+|---|---|
+| Mutate | jusqu'où Break défait la boucle. Le bas du potard donne de petites retouches discrètes, le haut une tout autre boucle |
+| Ramp | l'ampleur des rampes : vitesse atteinte et hauteur parcourue |
+| Groove | 1 : les coups gardent leur feeling ; 0 : tout est calé sur la grille |
+| Tune | hauteur de tout le break, en demi-tons |
+| Start on | une touche démarre immédiatement, ou sur le prochain 1/4, 1/8, 1/16 |
+| Loop length | 1, 2, 4 ou 8 mesures (devinée au chargement) |
+| Level | volume |
+| **Reroll** | **une autre version.** Break et les rolls ne sont pas tirés au hasard à chaque lecture : pour un même morceau ils donnent toujours le même résultat (donc ton export est identique à ce que tu entends). Reroll relance les dés : le même réglage, un autre mélange. Le numéro de version est affiché sous le bouton |
+
+## N'importe quel son
+Glisse un fichier audio n'importe où sur la fenêtre, ou utilise « Load » : une boucle de batterie, mais aussi un piano, une voix, un field recording. Le son est coupé à chaque attaque ; s'il n'y en a pas, il est coupé en 16 morceaux réguliers.
 
 ## Tests
-`tests/dsp_test.cpp` (sans JUCE) : le découpeur retrouve les 17 coups du break fourni et les classe (grosse caisse < caisse claire < charley) ; avec Mutate à 0 la boucle sort telle qu'elle est (même à un autre tempo, avec la même hauteur) ; de Mutate 0,1 (1 % des coups changent) à Storm au maximum (76 %) ; 10 000 événements testés, tous sur la grille (1/64 ou triolets de 1/48) ; mêmes dés pour la même mesure, graine différente = autre version ; rampes qui accélèrent / ralentissent avec swell / fade ; douze fills qui restent dans leur fenêtre, prennent la place de la boucle puis la rendent ; Drop parfaitement silencieux ; plusieurs touches ; arrêt de la lecture ; 400 gestes aléatoires sans problème.
+`tests/dsp_test.cpp` (sans JUCE) : découpe des coups du break fourni ; Loop intacte quels que soient les réglages, au bon tempo et à la bonne hauteur ; Break sur la grille (6 000 événements) ; mêmes dés pour la même mesure ; de Mutate 0,1 (5 % des coups changent) à 1 (96 %) ; rampes qui montent (cadence, hauteur, niveau) ou descendent ; chaque geste prend la place de la boucle, reste sur la grille, dure tant que la touche est tenue puis rend la boucle ; Drop silencieux ; plusieurs touches ; arrêt du transport ; 500 touches aléatoires.

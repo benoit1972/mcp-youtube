@@ -1,4 +1,4 @@
-// JUCE-free tests for the break cutter and the loop mutator. Build: g++ -std=c++17 -O2 -fsanitize=address,undefined tests/dsp_test.cpp
+// JUCE-free tests for the break cutter and the loop player. Build: g++ -std=c++17 -O2 -fsanitize=address,undefined tests/dsp_test.cpp
 #include "../Source/Dsp/Engine.h"
 #include <chrono>
 #include <cstdio>
@@ -10,7 +10,8 @@ static int failures = 0;
 #define CHECK(c) do { if (!(c)) { std::printf ("FAIL: %s (line %d)\n", #c, __LINE__); ++failures; } } while (0)
 
 static const double kSr = 48000.0;
-static const int kC = 60, kLoop = 60, kFlip = 61, kRatchet = 62, kSwap = 63, kHollow = 64, kBend = 65, kShove = 66, kGhost = 67, kMirror = 68, kStorm = 69, kStretch = 70;
+// the seven keys, on the white keys of the octave starting at C3 (MIDI 60)
+static const int kLoop = 60, kBreak = 62, kRollUp = 64, kRollDown = 65, kReverse = 67, kStop = 69, kDrop = 71;
 
 struct Run
 {
@@ -24,6 +25,7 @@ struct Run
         e.prepare (kSr); e.setLoopBeats (loopBeats); e.setKit (kit); e.setLog (&log);
         p.quant = 0; p.groove = 1.f;
     }
+    double step() const { return beat * 4.0; }
     void go (double seconds, bool playing = true)
     {
         std::vector<float> L (256), R (256);
@@ -36,6 +38,7 @@ struct Run
             for (int i = 0; i < n; ++i) out.push_back (0.5f * (L[(size_t) i] + R[(size_t) i]));
         }
     }
+    void steps (double n) { go (n * 60.0 / bpm / 4.0); }
 };
 static float peakOf (const std::vector<float>& v)
 {
@@ -60,13 +63,7 @@ static bool sameAudio (const std::vector<float>& a, const std::vector<float>& b)
     for (size_t i = 0; i < a.size(); ++i) if (a[i] != b[i]) return false;
     return true;
 }
-static std::set<std::pair<long, int>> baseSet (const sh::Kit* kit)
-{
-    Run r (kit); r.p.mutate = 0.f; r.p.groove = 0.f; r.e.noteOn (kLoop, 0.8f, r.p); r.go (8.0 * 60.0 / 90.0 * 1.0 - 0.01);
-    std::set<std::pair<long, int>> s;
-    for (const auto& l : r.log) s.insert ({ std::lround (l.step * 4.0), l.slice });
-    return s;
-}
+static bool onGrid (double step) { return std::abs (step * 6.0 - std::round (step * 6.0)) < 1e-6 || std::abs (step * 4.0 - std::round (step * 4.0)) < 1e-6; }
 
 int main()
 {
@@ -93,45 +90,47 @@ int main()
         CHECK (s.slices.empty());
         sh::Kit sh2; sh2.sampleRate = 44100.0; sh2.x.assign (500, 0.3f); sh2.analyse();
         CHECK (sh2.slices.empty());
-    }
-    // any sound can be dropped: one without attacks is cut into equal pieces, and plays
-    {
+        // any sound can be dropped: one without attacks is cut into equal pieces, and plays
         sh::Kit pad; pad.sampleRate = 44100.0;
         for (int i = 0; i < 44100 * 6; ++i) pad.x.push_back (0.3f * (float) (std::sin (0.031 * i) + 0.6 * std::sin (0.047 * i)));
         pad.analyse();
-        std::printf ("a sustained sound with no attacks: %zu pieces\n", pad.slices.size());
         CHECK (pad.slices.size() == 16);
         Run r (&pad, 8.0); r.p.mutate = 0.5f;
-        r.e.noteOn (kStorm, 0.8f, r.p); r.go (8 * 16 * 60.0 / 90.0 / 4.0);
+        r.e.noteOn (kBreak, 0.8f, r.p); r.steps (32);
         CHECK (peakOf (r.out) > 0.05f && peakOf (r.out) <= 1.0f);
-    }
-    // a longer, busier break must also be cut sensibly
-    {
-        sh::Kit k2 = sh::makeDefaultKit (48000.0);
-        k2.analyse();
-        CHECK (k2.slices.size() >= 15);
     }
 
     const double secPerStep = 60.0 / 90.0 / 4.0;
-    // ---- the loop, untouched ----
+    // ---- the key map ----
+    {
+        int expect[12] = { 0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6 };
+        bool ok = true;
+        for (int oct = 0; oct < 9; ++oct) for (int i = 0; i < 12; ++i) ok = ok && sh::keyOfNote (oct * 12 + i) == expect[i];
+        CHECK (ok);
+        CHECK (sh::keyOfNote (kLoop) == sh::KeyLoop && sh::keyOfNote (kBreak) == sh::KeyBreak && sh::keyOfNote (kRollUp) == sh::KeyRollUp && sh::keyOfNote (kRollDown) == sh::KeyRollDown
+               && sh::keyOfNote (kReverse) == sh::KeyReverse && sh::keyOfNote (kStop) == sh::KeyStop && sh::keyOfNote (kDrop) == sh::KeyDrop);
+    }
+    // ---- LOOP: the loop untouched, whatever the knobs say ----
+    std::vector<float> loopAudio;
     {
         Run r (&kit);
-        r.p.mutate = 0.f;
+        r.p.mutate = 1.f; r.p.ramp = 1.f;
         r.e.noteOn (kLoop, 0.8f, r.p);
-        r.go (2 * 16 * secPerStep);
-        const float pk = peakOf (r.out);
+        r.steps (32);
         auto t = attacks (r.out);
         int hit = 0;
         for (const auto& th : truth) for (double a : t) if (std::abs (a - th.time) < 0.012) { ++hit; break; }
-        std::printf ("mutate 0: %zu events logged, peak %.2f, %d of %zu hits at their place\n", r.log.size(), pk, hit, truth.size());
-        CHECK (pk > 0.3f && pk < 1.f);
-        CHECK (r.log.size() == truth.size());
-        CHECK (hit >= (int) truth.size() - 1);
-        for (const auto& l : r.log) CHECK (l.kind == 0 && ! l.rev && l.r0 == 1.f);
+        std::printf ("LOOP with Mutate at the maximum: %zu events, peak %.2f, %d of %zu hits at their place\n", r.log.size(), peakOf (r.out), hit, truth.size());
+        CHECK (peakOf (r.out) > 0.3f && peakOf (r.out) < 1.f);
+        CHECK (r.log.size() == truth.size() && hit >= (int) truth.size() - 1);
+        for (const auto& l : r.log) CHECK (l.kind == 0 && ! l.rev && l.r0 == 1.f && l.r1 == 1.f);
+        loopAudio = r.out;
+        Run z (&kit); z.p.mutate = 0.f; z.e.noteOn (kLoop, 0.8f, z.p); z.steps (32);
+        CHECK (sameAudio (z.out, loopAudio));
     }
     // ---- it follows the tempo, and keeps the pitch ----
     {
-        Run r (&kit); r.p.mutate = 0.f; r.bpm = 120.0;
+        Run r (&kit); r.bpm = 120.0;
         r.e.noteOn (kLoop, 0.8f, r.p);
         r.go (2 * 16 * 60.0 / 120.0 / 4.0);
         auto t = attacks (r.out);
@@ -140,295 +139,234 @@ int main()
         std::printf ("at 120 bpm: %d of %zu hits at their scaled place\n", hit, truth.size());
         CHECK (hit >= (int) truth.size() - 2);
         auto zc = [&] (const std::vector<float>& v) { int c = 0; for (size_t i = 100; i + 1 < (size_t) (0.05 * kSr); ++i) if ((v[i] < 0.f) != (v[i + 1] < 0.f)) ++c; return c; };
-        Run q (&kit); q.p.mutate = 0.f; q.e.noteOn (kLoop, 0.8f, q.p); q.go (1.0);
-        const int a = zc (q.out), b = zc (r.out);
-        std::printf ("  first kick: %d zero crossings at 90 bpm, %d at 120 bpm\n", a, b);
+        const int a = zc (loopAudio), b = zc (r.out);
         CHECK (a > 3 && std::abs (a - b) <= std::max (2, a / 8));
     }
-    // ---- always on the grid ----
+    // ---- BREAK: always on the grid ----
     {
         int bad = 0, total = 0; std::set<int> kinds;
-        for (int seed = 1; seed <= 6; ++seed)
-            for (int note : { kStorm, kRatchet, kShove, kMirror, kGhost })
-            {
-                Run r (&kit); r.p.mutate = 1.f; r.p.groove = 0.f; r.p.seed = seed;
-                for (auto* k : { &r.p.shuffle, &r.p.reverse, &r.p.pitch, &r.p.ghosts, &r.p.holes }) *k = 1.f;
-                r.p.ramp = (seed % 2) ? 1.f : -1.f;
-                r.e.noteOn (note, 0.9f, r.p);
-                r.go (16 * 16 * secPerStep);
-                for (const auto& l : r.log) { ++total; kinds.insert (l.kind); if (std::abs (l.step * 6.0 - std::round (l.step * 6.0)) > 1e-6 && std::abs (l.step * 4.0 - std::round (l.step * 4.0)) > 1e-6) ++bad; }
-            }
-        std::printf ("grid: %d events over 30 runs of 16 bars, %d off the grid (1/64 notes or 1/48 triplets); kinds seen: %zu\n", total, bad, kinds.size());
+        for (int seed = 1; seed <= 12; ++seed)
+        {
+            Run r (&kit); r.p.mutate = 1.f; r.p.groove = 0.f; r.p.seed = seed; r.p.ramp = (seed % 2) ? 1.f : 0.3f;
+            r.e.noteOn (kBreak, 0.9f, r.p);
+            r.steps (16 * 16);
+            for (const auto& l : r.log) { ++total; kinds.insert (l.kind); if (! onGrid (l.step)) ++bad; }
+        }
+        std::printf ("BREAK on the grid: %d events over 12 runs of 16 bars, %d off the grid (1/64 notes or 1/48 triplets); kinds seen: %zu\n", total, bad, kinds.size());
         CHECK (total > 500 && bad == 0);
         CHECK (kinds.size() == 4);          // loop hits, rolls, ghosts, fills
     }
     // ---- written, not random ----
     {
-        auto go = [&] (Run& r, int seed, int note, double startBeat)
+        auto go = [&] (Run& r, int seed, int note)
         {
-            r.p.mutate = 0.8f; r.p.seed = seed; r.beat = startBeat;
+            r.p.mutate = 0.8f; r.p.seed = seed;
             r.e.noteOn (note, 0.8f, r.p);
-            r.go (8 * 16 * secPerStep);
+            r.steps (8 * 16);
         };
         Run a (&kit), b (&kit), c (&kit), d (&kit);
-        go (a, 1, kStorm, 0.0); go (b, 1, kStorm, 0.0); go (c, 2, kStorm, 0.0); go (d, 1, kRatchet, 0.0);
+        go (a, 1, kBreak); go (b, 1, kBreak); go (c, 2, kBreak); go (d, 1, kLoop);
         CHECK (sameAudio (a.out, b.out));
         CHECK (! sameAudio (a.out, c.out));
         CHECK (! sameAudio (a.out, d.out));
-        // and each bar is different from the last, even though the loop is only two bars long
         auto bar = [&] (long n) { std::vector<std::pair<long, int>> v; for (const auto& l : a.log) if (std::floor (l.step / 16.0) == (double) n) v.push_back ({ std::lround ((l.step - 16.0 * (double) n) * 4.0), l.slice }); return v; };
-        CHECK (bar (0) != bar (2) || bar (1) != bar (3));
+        CHECK (bar (0) != bar (2) || bar (1) != bar (3));       // each bar is different from the last, though the loop is only two bars long
     }
     // ---- from a whisper to another loop ----
     {
-        const auto base = baseSet (&kit);
-        auto changed = [&] (float mutate, int note)
+        std::set<std::tuple<long, int, bool, long>> base;
+        { Run r (&kit); r.p.groove = 0.f; r.e.noteOn (kLoop, 0.8f, r.p); r.steps (32); for (const auto& l : r.log) base.insert ({ std::lround (l.step * 4.0), l.slice, l.rev, std::lround (l.r0 * 100) }); }
+        auto changed = [&] (float mutate)
         {
-            double sum = 0.0; int runs = 0;
+            double sum = 0.0;
             for (int seed = 1; seed <= 12; ++seed)
             {
                 Run r (&kit); r.p.mutate = mutate; r.p.seed = seed; r.p.groove = 0.f;
-                r.e.noteOn (note, 0.8f, r.p);
-                r.go (8 * 16 * secPerStep);
+                r.e.noteOn (kBreak, 0.8f, r.p); r.steps (8 * 16);
                 int ch = 0, n = 0;
-                for (const auto& l : r.log) { ++n; if (! base.count ({ std::lround (l.step * 4.0) % 128, l.slice })) ++ch; }
-                sum += (double) ch / std::max (1, n); ++runs;
+                for (const auto& l : r.log) { ++n; if (! base.count ({ std::lround (l.step * 4.0) % 128, l.slice, l.rev, std::lround (l.r0 * 100) })) ++ch; }
+                sum += (double) ch / std::max (1, n);
             }
-            return sum / runs;
+            return sum / 12.0;
         };
-        const double a = changed (0.1f, kLoop), b = changed (0.35f, kLoop), c = changed (0.6f, kLoop), d = changed (1.f, kStorm), z = changed (0.f, kStorm);
-        std::printf ("share of the events that are not in the original loop: mutate 0 -> %.0f %%, 0.1 -> %.0f %%, 0.35 -> %.0f %%, 0.6 -> %.0f %%, 1.0 (Storm) -> %.0f %%\n", z * 100, a * 100, b * 100, c * 100, d * 100);
+        const double z = changed (0.f), a = changed (0.1f), b = changed (0.3f), c = changed (0.6f), d = changed (1.f);
+        std::printf ("share of the hits that are not in the original loop: Mutate 0 -> %.0f %%, 0.1 -> %.0f %%, 0.3 -> %.0f %%, 0.6 -> %.0f %%, 1.0 -> %.0f %%\n", z * 100, a * 100, b * 100, c * 100, d * 100);
         CHECK (z == 0.0);
         CHECK (a > 0.0 && a < 0.12);         // a whisper: a few things change
-        CHECK (a < b && b < c);
+        CHECK (a < b && b < c && c < d);
         CHECK (d > 0.5);                     // the top of the knob: another loop
     }
-    // ---- the kinds of damage ----
+    // ---- the rolls of BREAK: a stutter-edit ramp ----
     {
-        auto share = [&] (int note, auto&& setup, auto&& pred)
+        int up = 0, down = 0, okUp = 0, okDown = 0;
+        for (int seed = 1; seed <= 20; ++seed)
         {
-            int n = 0, m = 0;
-            for (int seed = 1; seed <= 10; ++seed)
+            Run r (&kit); r.p.mutate = 1.f; r.p.seed = seed; r.p.ramp = 1.f; r.p.groove = 0.f;
+            r.e.noteOn (kBreak, 0.9f, r.p); r.steps (8 * 16);
+            std::map<int, std::vector<sh::EventLog>> groups;
+            for (const auto& l : r.log) if (l.kind == 1 && l.grp > 0) groups[l.grp].push_back (l);
+            for (auto& g : groups)
             {
-                Run r (&kit); r.p.mutate = 1.f; r.p.seed = seed; setup (r.p);
-                r.e.noteOn (note, 0.9f, r.p);
-                r.go (8 * 16 * secPerStep);
-                for (const auto& l : r.log) { ++n; if (pred (l)) ++m; }
+                const auto& s = g.second;
+                if (s.size() < 4) continue;
+                const bool isUp = s.back().step - s[s.size() - 2].step < s[1].step - s[0].step;
+                bool gapsOk = true, pitchOk = true;
+                for (size_t i = 2; i < s.size(); ++i)
+                {
+                    const double g1 = s[i].step - s[i - 1].step, g0 = s[i - 1].step - s[i - 2].step;
+                    if (isUp ? g1 > g0 + 1e-6 : g1 < g0 - 1e-6) gapsOk = false;
+                }
+                for (size_t i = 2; i < s.size(); ++i) if (isUp ? s[i].r0 < s[i - 1].r0 - 1e-5f : s[i].r0 > s[i - 1].r0 + 1e-5f) pitchOk = false;
+                const bool velOk = isUp ? s.back().vel > s.front().vel : s.back().vel < s.front().vel;
+                const bool ok = gapsOk && pitchOk && velOk;
+                if (isUp) { ++up; if (ok) ++okUp; } else { ++down; if (ok) ++okDown; }
             }
-            return n ? (double) m / n : 0.0;
-        };
-        const double revHi = share (kFlip, [] (sh::Params& p) { p.reverse = 1.f; }, [] (const sh::EventLog& l) { return l.rev; });
-        const double revLo = share (kFlip, [] (sh::Params& p) { p.reverse = 0.f; }, [] (const sh::EventLog& l) { return l.rev; });
-        std::printf ("backwards: Flip with Reverse 1 -> %.0f %% of the hits, Reverse 0 -> %.0f %%\n", revHi * 100, revLo * 100);
-        CHECK (revHi > 0.2 && revHi > revLo * 1.8);
-        const double bent = share (kBend, [] (sh::Params& p) { p.pitch = 1.f; }, [] (const sh::EventLog& l) { return l.r0 != 1.f || l.r1 != 1.f; });
-        std::printf ("bent in pitch: Bend -> %.0f %% of the hits\n", bent * 100);
-        CHECK (bent > 0.1);
-        const double ghosts = share (kGhost, [] (sh::Params& p) { p.ghosts = 1.f; }, [] (const sh::EventLog& l) { return l.kind == 2; });
-        const double ghostsLo = share (kGhost, [] (sh::Params& p) { p.ghosts = 0.f; }, [] (const sh::EventLog& l) { return l.kind == 2; });
-        std::printf ("ghost hits: Ghost with Ghosts 1 -> %.0f %%, Ghosts 0 -> %.0f %%\n", ghosts * 100, ghostsLo * 100);
-        CHECK (ghosts > 0.15 && ghosts > ghostsLo * 1.5);
-        bool soft = true;
-        for (int seed = 1; seed <= 6; ++seed)
-        {
-            Run r (&kit); r.p.mutate = 1.f; r.p.seed = seed; r.p.ghosts = 1.f;
-            r.e.noteOn (kGhost, 0.9f, r.p); r.go (8 * 16 * secPerStep);
-            for (const auto& l : r.log) if (l.kind == 2 && l.vel > 0.6f) soft = false;
         }
-        CHECK (soft);
-        // holes: fewer hits than the loop
-        auto count = [&] (float holes)
-        {
-            int n = 0;
-            for (int seed = 1; seed <= 10; ++seed)
-            {
-                Run r (&kit); r.p.mutate = 1.f; r.p.seed = seed; r.p.holes = holes; r.p.ghosts = 0.f; r.p.ramp = 0.f; r.p.shuffle = 0.f; r.p.reverse = 0.f; r.p.pitch = 0.f;
-                r.e.noteOn (kHollow, 0.9f, r.p); r.go (8 * 16 * secPerStep);
-                for (const auto& l : r.log) if (l.kind == 0) ++n;
-            }
-            return n;
-        };
-        const int fewer = count (1.f), more = count (0.f);
-        std::printf ("hits of the loop that survive: Holes 1 -> %d, Holes 0 -> %d\n", fewer, more);
-        CHECK (fewer < more);
-    }
-    // ---- stutter-edit ramps: the rate climbs or falls through the grid ----
-    {
-        auto rolls = [&] (float ramp)
-        {
-            std::vector<std::vector<sh::EventLog>> seqs;
-            for (int seed = 1; seed <= 12; ++seed)
-            {
-                Run r (&kit); r.p.mutate = 1.f; r.p.seed = seed; r.p.ramp = ramp; r.p.ghosts = 0.f; r.p.holes = 0.f; r.p.shuffle = 0.f; r.p.groove = 0.f;
-                r.e.noteOn (kRatchet, 0.9f, r.p); r.go (8 * 16 * secPerStep);
-                std::map<int, std::vector<sh::EventLog>> groups;
-                for (const auto& l : r.log) if (l.kind == 1 && l.grp > 0) groups[l.grp + seed * 100000000].push_back (l);
-                for (auto& g : groups) if (g.second.size() >= 4) seqs.push_back (g.second);
-            }
-            return seqs;
-        };
-        const auto up = rolls (1.f), down = rolls (-1.f);
-        int okUp = 0, okDown = 0;
-        for (const auto& s : up)
-        {
-            bool mono = true; for (size_t i = 2; i < s.size(); ++i) if (s[i].step - s[i - 1].step > s[i - 1].step - s[i - 2].step + 1e-6) mono = false;
-            if (mono && s.back().vel > s.front().vel && s.back().step - s.front().step > 0.5) ++okUp;
-        }
-        for (const auto& s : down)
-        {
-            bool mono = true; for (size_t i = 2; i < s.size(); ++i) if (s[i].step - s[i - 1].step < s[i - 1].step - s[i - 2].step - 1e-6) mono = false;
-            if (mono && s.back().vel < s.front().vel) ++okDown;
-        }
-        std::printf ("rolls: Ramp +1 -> %zu rolls (%d speed up and swell), Ramp -1 -> %zu rolls (%d slow down and fade)\n", up.size(), okUp, down.size(), okDown);
-        CHECK (up.size() >= 4 && (double) okUp >= 0.8 * (double) up.size());
-        CHECK (down.size() >= 4 && (double) okDown >= 0.8 * (double) down.size());
-    }
-    // ---- the end of a phrase ----
-    {
-        int fills = 0;
-        for (int seed = 1; seed <= 12; ++seed)
-        {
-            Run r (&kit); r.p.mutate = 0.8f; r.p.seed = seed;
-            r.e.noteOn (kStorm, 0.9f, r.p); r.go (8 * 16 * secPerStep);
-            bool inLast = false;
-            for (const auto& l : r.log) if (l.kind == 3) { const long bar = (long) std::floor (l.step / 16.0); if (bar % 4 == 3) inLast = true; else fills = -1000; }
-            if (inLast) ++fills;
-        }
-        std::printf ("fills at the end of a phrase: %d of 12 runs\n", fills);
-        CHECK (fills >= 4);
+        std::printf ("rolls inside BREAK: %d climbing (%d speed up, rise and swell), %d falling (%d slow down, sag and fade)\n", up, okUp, down, okDown);
+        CHECK (up >= 8 && okUp >= up * 9 / 10);
+        CHECK (down >= 4 && okDown >= down * 9 / 10);
     }
     // ---- several keys, several loops ----
     {
         Run one (&kit); one.p.mutate = 0.6f;
-        one.e.noteOn (kLoop, 0.8f, one.p); one.go (8 * 16 * secPerStep);
+        one.e.noteOn (kLoop, 0.8f, one.p); one.steps (8 * 16);
         Run many (&kit); many.p.mutate = 0.6f;
-        for (int n : { kLoop, kFlip, kRatchet, kGhost }) many.e.noteOn (n, 0.8f, many.p);
-        many.go (8 * 16 * secPerStep);
+        for (int n : { kLoop, kBreak, kLoop + 12, kBreak + 12 }) many.e.noteOn (n, 0.8f, many.p);
+        many.steps (8 * 16);
         std::set<int> notes; for (const auto& l : many.log) notes.insert (l.note);
-        std::printf ("4 keys held: voices %d, notes heard %zu, peak %.2f (1 key: %.2f)\n", many.e.activeVoices(), notes.size(), peakOf (many.out), peakOf (one.out));
+        std::printf ("4 keys held: voices %d, keys heard %zu, peak %.2f (1 key: %.2f)\n", many.e.activeVoices(), notes.size(), peakOf (many.out), peakOf (one.out));
         CHECK (many.e.activeVoices() == 4 && notes.size() == 4);
-        CHECK (peakOf (many.out) < 1.0f && peakOf (many.out) < peakOf (one.out) * 2.5f);
-        many.e.noteOff (kLoop); many.e.noteOff (kFlip); many.e.noteOff (kRatchet); many.e.noteOff (kGhost);
+        CHECK (peakOf (many.out) < 1.0f);
+        many.e.allNotesOff();
         const size_t before = many.log.size();
-        many.go (2.0);
-        std::printf ("  after the keys are let go: %zu more events, voices %d, hits ringing %d\n", many.log.size() - before, many.e.activeVoices(), many.e.activeHits());
+        many.steps (12);
         CHECK (many.log.size() - before <= 4 && many.e.activeVoices() == 0);
-        many.go (1.5);
+        many.steps (10);
         CHECK (many.e.activeHits() == 0);
     }
-    // ---- a note starts on the grid ----
+
+    // ---- the five gestures ----
+    // A Loop key is held; a gesture is played on top of it. For each: it takes the floor (no loop hit inside its window), stays on the grid,
+    // lasts as long as the key is held, and gives the loop back.
+    struct G { int note; const char* name; double nominal; };
+    const G gestures[5] = { { kRollUp, "Roll up", 8 }, { kRollDown, "Roll down", 8 }, { kReverse, "Reverse", 4 }, { kStop, "Stop", 6 }, { kDrop, "Drop", 4 } };
+    for (const auto& g : gestures)
+    {
+        for (int mode = 0; mode < 2; ++mode)               // 0: a tap, 1: held for 20 steps
+        {
+            Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.p.groove = 0.f;
+            r.steps (0.1);
+            r.e.noteOn (kLoop, 0.8f, r.p);
+            r.steps (3 * 16 + 0.05);
+            r.log.clear();
+            r.e.noteOn (g.note, 0.9f, r.p);
+            const double pressed = r.step(), start = std::ceil (pressed - 1e-9);
+            double held = mode == 0 ? 0.0 : 20.0;
+            r.steps (held);
+            r.e.noteOff (g.note);
+            const double released = r.step();
+            r.steps (g.nominal + 10.0);
+            const double end = mode == 0 ? start + g.nominal : std::max (start + g.nominal, std::ceil (released - 1e-9));
+            int nG = 0, loopInside = 0; bool grid = true; double firstG = 1e9, lastG = -1e9; int loopAfter = 0;
+            double accentAt = -1.0;
+            for (const auto& l : r.log)
+            {
+                if (l.note == g.note)
+                {
+                    ++nG; firstG = std::min (firstG, l.step); lastG = std::max (lastG, l.step);
+                    if (! onGrid (l.step)) grid = false;
+                    if (g.note == kDrop) accentAt = l.step;
+                }
+                else if (l.step >= start + 1e-9 && l.step < end - 1e-9) ++loopInside;
+                else if (l.step >= end - 1e-9) ++loopAfter;
+            }
+            std::printf ("%-9s %s: %3d events, from step %.1f to %.1f (window %.0f to %.0f), %d loop hits inside, %d after\n", g.name, mode ? "held " : "tapped", nG, firstG - start, lastG - start, 0.0, end - start, loopInside, loopAfter);
+            CHECK (grid && loopInside == 0 && loopAfter > 0);
+            CHECK (peakOf (r.out) <= 1.0f);
+            if (g.note == kDrop) CHECK (nG == 1 && std::abs (accentAt - end) < 0.51);        // one hard hit, as the key is let go
+            else CHECK (nG >= 1 && firstG >= start - 1e-6 && lastG <= end + 1e-6);
+            if (mode == 1 && g.note != kDrop && g.note != kStop) CHECK (lastG > start + g.nominal + 4.0);   // it went on beyond its first block
+            if (g.note == kDrop && mode == 1) CHECK (accentAt >= start + 20.0 - 0.01);
+        }
+    }
+    {   // what each one is
+        auto run = [&] (int note, double held)
+        {
+            auto r = std::make_unique<Run> (&kit); r->p.mutate = 0.f; r->p.quant = 3; r->p.groove = 0.f; r->p.ramp = 1.f;
+            r->steps (0.1); r->e.noteOn (kLoop, 0.8f, r->p); r->steps (3 * 16 + 0.05); r->log.clear();
+            r->e.noteOn (note, 0.9f, r->p); r->steps (held); r->e.noteOff (note); r->steps (14);
+            std::vector<sh::EventLog> v; for (const auto& l : r->log) if (l.note == note) v.push_back (l);
+            return v;
+        };
+        {   auto v = run (kRollUp, 0.0);     // climbing: faster, higher, louder
+            bool gaps = v.size() >= 8, pitch = true;
+            for (size_t i = 2; i < v.size(); ++i) { gaps = gaps && v[i].step - v[i - 1].step <= v[i - 1].step - v[i - 2].step + 1e-6; pitch = pitch && v[i].r0 >= v[i - 1].r0 - 1e-5f; }
+            std::printf ("Roll up: %zu repeats, pitch from %.2f to %.2f, level from %.2f to %.2f\n", v.size(), v.front().r0, v.back().r0, v.front().vel, v.back().vel);
+            CHECK (gaps && pitch && v.back().vel > v.front().vel * 2.f && v.back().r0 > 1.5f);
+            auto h = run (kRollUp, 20.0);    // held: it stays at full speed, high
+            CHECK (h.size() > v.size() + 20);
+            CHECK (std::abs ((h.back().step - h[h.size() - 2].step) - 0.25) < 1e-6 && h.back().r0 > 1.5f);
+        }
+        {   auto v = run (kRollDown, 0.0);   // stretching: slower, lower, quieter
+            bool gaps = v.size() >= 8, pitch = true;
+            for (size_t i = 2; i < v.size(); ++i) { gaps = gaps && v[i].step - v[i - 1].step >= v[i - 1].step - v[i - 2].step - 1e-6; pitch = pitch && v[i].r0 <= v[i - 1].r0 + 1e-5f; }
+            std::printf ("Roll down: %zu repeats, pitch from %.2f to %.2f, level from %.2f to %.2f, last gap %.2f steps\n", v.size(), v.front().r0, v.back().r0, v.front().vel, v.back().vel, v.back().step - v[v.size() - 2].step);
+            CHECK (gaps && pitch && v.back().vel < v.front().vel * 0.5f && v.back().r0 < 0.8f);
+            CHECK (v.back().step - v[v.size() - 2].step >= 1.0);                  // the last repeats are drawn out
+        }
+        {   auto v = run (kReverse, 0.0); bool allRev = ! v.empty(); for (const auto& l : v) allRev = allRev && l.rev; CHECK (allRev); }
+        {   auto v = run (kStop, 0.0); bool falling = v.size() >= 2; for (size_t i = 1; i < v.size(); ++i) falling = falling && v[i].r0 < v[i - 1].r0 + 1e-6f; CHECK (falling && v.back().r0 < 0.7f); }
+        {   // Drop is silent while it is held, and the hit that ends it is hard
+            auto measure = [&] (bool drop)
+            {
+                Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.steps (0.1);
+                r.e.noteOn (kLoop, 0.8f, r.p); r.steps (3 * 16 + 0.05);
+                const size_t n0 = r.out.size();
+                if (drop) r.e.noteOn (kDrop, 0.9f, r.p);
+                r.steps (12);
+                return rms (r.out, (double) n0 / kSr + 2.0 * secPerStep, (double) n0 / kSr + 11.0 * secPerStep);
+            };
+            const double a = measure (true), b = measure (false);
+            std::printf ("Drop held: level %.4f against %.4f for the loop\n", a, b);
+            CHECK (a < 0.05 * b + 1e-9);
+        }
+    }
+    // ---- a key starts on the grid ----
     {
         Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.beat = 0.3;           // 1.2 steps in
-        r.go (0.004);                                                           // (the engine learns where the song is)
+        r.steps (0.1);
         r.e.noteOn (kLoop, 0.8f, r.p);
-        r.go (16 * secPerStep);
+        r.steps (16);
         double first = 1e9; for (const auto& l : r.log) first = std::min (first, l.step);
-        std::printf ("note pressed 1.3 steps into the bar: first event at step %.2f with quantise 1/16\n", first);
         CHECK (first >= 2.0 - 1e-6);
     }
     // ---- the transport ----
     {
         Run r (&kit); r.p.mutate = 0.5f;
-        r.e.noteOn (kLoop, 0.8f, r.p);
+        r.e.noteOn (kBreak, 0.8f, r.p);
         r.go (1.0);
         const size_t n = r.out.size();
         r.go (1.0, false);
         CHECK (rms (r.out, (double) n / kSr, (double) r.out.size() / kSr) == 0.0);
-        CHECK (r.e.activeVoices() == 0);
-    }
-    // ---- the fills ----
-    {
-        static const double lens[sh::numFills] = { 4, 8, 4, 4, 4, 4, 6, 8, 4, 8, 4, 8 };
-        for (int t = 0; t < sh::numFills; ++t)
-        {
-            Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.p.groove = 0.f;
-            r.go (0.004);
-            r.e.noteOn (kLoop, 0.8f, r.p);                         // the loop is playing
-            r.go (3 * 16 * secPerStep + 0.001);
-            const double start = 4.0 * 16.0 / 16.0 * 4.0;           // the fill is pressed at the start of a beat-aligned step
-            (void) start;
-            r.log.clear();
-            const size_t before = r.out.size();
-            r.e.noteOn (sh::kFillBase + t, 0.9f, r.p);
-            const double pressedAt = r.beat * 4.0;                  // in steps
-            const double fillStart = std::ceil (pressedAt - 1e-9);
-            r.go ((lens[t] + 6.0) * secPerStep);
-            double firstFill = 1e9, lastFill = -1e9; int nFill = 0, loopInside = 0; bool onGrid = true, finite = true;
-            for (const auto& l : r.log)
-            {
-                if (l.note == sh::kFillBase + t)
-                {
-                    ++nFill; firstFill = std::min (firstFill, l.step); lastFill = std::max (lastFill, l.step);
-                    if (std::abs (l.step * 6.0 - std::round (l.step * 6.0)) > 1e-6 && std::abs (l.step * 4.0 - std::round (l.step * 4.0)) > 1e-6) onGrid = false;
-                }
-                else if (l.step >= fillStart + 1e-9 && l.step < fillStart + lens[t] - 1e-9) ++loopInside;
-            }
-            std::vector<float> after (r.out.begin() + (long) before, r.out.end());
-            finite = peakOf (after) <= 1.0f;
-            std::printf ("fill %-9s: %2d events from step %.1f to %.1f, %d loop hits inside it, ", sh::kFillNames[t], nFill, firstFill - fillStart, lastFill - fillStart, loopInside);
-            std::printf ("loop back afterwards: %s\n", r.log.size() > (size_t) nFill ? "yes" : "NO");
-            CHECK (nFill >= 1 && onGrid && finite);
-            CHECK (firstFill >= fillStart - 1e-6 && lastFill <= fillStart + lens[t] + 1e-6);   // inside its own window (the drop's return lands on the end)
-            CHECK (loopInside == 0);                                // the fill has the floor
-            CHECK (r.log.size() > (size_t) nFill);                  // and the loop comes back
-        }
-        // what each one is
-        auto fillRun = [&] (int t)
-        {
-            auto r = std::make_unique<Run> (&kit); r->p.mutate = 0.f; r->p.quant = 3; r->go (0.004);
-            r->e.noteOn (kLoop, 0.8f, r->p); r->go (3 * 16 * secPerStep + 0.001); r->log.clear();
-            r->e.noteOn (sh::kFillBase + t, 0.9f, r->p); r->go (14 * secPerStep);
-            std::vector<sh::EventLog> v; for (const auto& l : r->log) if (l.note == sh::kFillBase + t) v.push_back (l);
-            return v;
-        };
-        { auto v = fillRun (0); bool up = v.size() >= 5; for (size_t i = 2; i < v.size(); ++i) up = up && v[i].step - v[i - 1].step <= v[i - 1].step - v[i - 2].step + 1e-6; CHECK (up && v.back().vel > v.front().vel); }
-        { auto v = fillRun (2); bool dn = v.size() >= 5; for (size_t i = 2; i < v.size(); ++i) dn = dn && v[i].step - v[i - 1].step >= v[i - 1].step - v[i - 2].step - 1e-6; CHECK (dn && v.back().vel < v.front().vel); }
-        { auto v = fillRun (5); bool allRev = ! v.empty(); for (const auto& l : v) allRev = allRev && l.rev; CHECK (allRev); }
-        { auto v = fillRun (8); bool same = v.size() >= 4; for (const auto& l : v) same = same && l.slice == v[0].slice; CHECK (same); }
-        { auto v = fillRun (10); bool desc = v.size() == 8; for (size_t i = 1; i < v.size(); ++i) desc = desc && v[i].r0 < v[i - 1].r0; CHECK (desc); }
-        { auto v = fillRun (6); bool falling = v.size() >= 2; for (size_t i = 1; i < v.size(); ++i) falling = falling && v[i].r0 < v[i - 1].r0 + 1e-6; CHECK (falling && v.back().r0 < 0.7f); }
-        { auto v = fillRun (7); CHECK (v.size() == 1 && v[0].vel > 1.0f); }
-        // the drop is silent
-        {
-            Run r (&kit); r.p.mutate = 0.f; r.p.quant = 3; r.go (0.004);
-            r.e.noteOn (kLoop, 0.8f, r.p); r.go (3 * 16 * secPerStep + 0.001);
-            const double before = r.beat * 4.0;
-            const size_t n0 = r.out.size();
-            r.e.noteOn (sh::kFillBase + 7, 0.9f, r.p); r.go (8 * secPerStep);
-            const double a = rms (r.out, (double) n0 / kSr + 2.0 * secPerStep, (double) n0 / kSr + 7.0 * secPerStep);
-            Run ref (&kit); ref.p.mutate = 0.f; ref.p.quant = 3; ref.go (0.004);
-            ref.e.noteOn (kLoop, 0.8f, ref.p); ref.go (3 * 16 * secPerStep + 0.001);
-            const size_t m0 = ref.out.size(); ref.go (8 * secPerStep);
-            const double b = rms (ref.out, (double) m0 / kSr + 2.0 * secPerStep, (double) m0 / kSr + 7.0 * secPerStep);
-            std::printf ("drop: level %.4f against %.4f for the loop (pressed at step %.1f)\n", a, b, before);
-            CHECK (a < 0.2 * b);
-        }
-        // several fills in a row, and with the keys: no trouble
-        {
-            Run r (&kit); r.p.mutate = 0.7f;
-            r.e.noteOn (kStorm, 0.9f, r.p);
-            for (int i = 0; i < 12; ++i) { r.e.noteOn (sh::kFillBase + i, 0.9f, r.p); r.go (0.4); }
-            r.go (3.0);
-            CHECK (peakOf (r.out) <= 1.0f);
-        }
+        CHECK (r.e.activeVoices() == 0 && ! r.e.gestureActive());
     }
     // ---- hard use ----
     {
         gg::Rng g (9);
         Run r (&kit);
         float pk = 0.f; bool finite = true;
-        for (int i = 0; i < 400; ++i)
+        for (int i = 0; i < 500; ++i)
         {
-            r.p.mutate = g.uni(); r.p.shuffle = g.uni(); r.p.reverse = g.uni(); r.p.pitch = g.uni(); r.p.ghosts = g.uni(); r.p.holes = g.uni();
-            r.p.ramp = g.bi(); r.p.groove = g.uni(); r.p.gate = 0.2f + 0.8f * g.uni(); r.p.tune = g.bi() * 12.f; r.p.quant = (int) (g.uni() * 4.f); r.p.seed = 1 + i % 50;
+            r.p.mutate = g.uni(); r.p.ramp = g.uni(); r.p.groove = g.uni(); r.p.tune = g.bi() * 12.f; r.p.quant = (int) (g.uni() * 4.f); r.p.seed = 1 + i % 50;
             r.bpm = 60.0 + 120.0 * g.uni();
-            if (g.uni() < 0.5f) r.e.noteOn (36 + (int) (g.uni() * 60.f), g.uni(), r.p); else r.e.noteOff (36 + (int) (g.uni() * 60.f));
+            const int note = 36 + (int) (g.uni() * 60.f);
+            if (g.uni() < 0.55f) r.e.noteOn (note, g.uni(), r.p); else r.e.noteOff (note);
             const size_t n = r.out.size();
             r.go (0.12);
             std::vector<float> chunk (r.out.begin() + (long) n, r.out.end());
             pk = std::max (pk, peakOf (chunk)); finite = finite && peakOf (chunk) < 1e8f;
         }
-        std::printf ("400 random gestures: peak %.3f, voices %d, hits ringing %d\n", pk, r.e.activeVoices(), r.e.activeHits());
+        std::printf ("500 random key presses: peak %.3f, voices %d, hits ringing %d\n", pk, r.e.activeVoices(), r.e.activeHits());
         CHECK (finite && pk <= 1.0f);
     }
     std::printf (failures ? "%d FAILURES\n" : "ALL TESTS PASSED\n", failures);

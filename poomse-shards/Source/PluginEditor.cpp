@@ -2,7 +2,7 @@
 
 namespace
 {
-constexpr int kWidth = 780, kHeight = 710, kPad = 28;
+constexpr int kWidth = 780, kHeight = 650, kPad = 28;
 constexpr float kInset = 10.f;
 const char* const kAudioExt = "wav;aif;aiff;mp3;flac;m4a;ogg;caf";
 const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -16,8 +16,8 @@ BreakView::BreakView (PoomseShardsProcessor& p) : proc (p)
     startTimerHz (30);
 }
 
-juce::Rectangle<float> BreakView::mapArea() const   { return getLocalBounds().toFloat().withTrimmedBottom (62.f); }
-juce::Rectangle<float> BreakView::stripArea() const { return getLocalBounds().toFloat().removeFromBottom (52.f); }
+juce::Rectangle<float> BreakView::mapArea() const   { return getLocalBounds().toFloat().withTrimmedBottom (54.f); }
+juce::Rectangle<float> BreakView::stripArea() const { return getLocalBounds().toFloat().removeFromBottom (46.f); }
 
 void BreakView::pollHits()
 {
@@ -48,25 +48,6 @@ void BreakView::timerCallback()
     }
     pollHits();
     if (messageTicks > 0 && --messageTicks == 0) message = {};
-    repaint();
-}
-
-bool BreakView::isInterestedInFileDrag (const juce::StringArray& files)
-{
-    for (const auto& f : files) if (juce::File (f).hasFileExtension (kAudioExt)) return true;
-    return false;
-}
-
-void BreakView::filesDropped (const juce::StringArray& files, int, int)
-{
-    dropHover = false;
-    for (const auto& f : files)
-    {
-        const juce::File file (f);
-        if (! file.hasFileExtension (kAudioExt)) continue;
-        if (! proc.loadBreak (file)) { message = "NO HITS FOUND IN THIS FILE"; messageTicks = 90; }
-        break;
-    }
     repaint();
 }
 
@@ -147,26 +128,27 @@ void BreakView::paint (juce::Graphics& g)
         g.setColour (look::paper.withAlpha (0.82f)); g.fillRoundedRectangle (all, 6.f);
         g.setColour (look::accent); g.drawRoundedRectangle (all.reduced (1.f), 6.f, 2.f);
         g.setFont (look::caps (15.f, true, 0.3f));
-        g.drawText ("DROP A DRUM LOOP", getLocalBounds(), juce::Justification::centred, false);
+        g.drawText ("DROP A SOUND", getLocalBounds(), juce::Justification::centred, false);
     }
 }
 
 //==============================================================================
 void PadButton::paint (juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced (2.f);
+    auto r = getLocalBounds().toFloat().reduced (3.f);
     const bool on = lit || down;
-    if (on) { g.setColour (look::accent); g.fillRoundedRectangle (r, 6.f); }
-    else    { g.setColour (hover ? look::paper2 : look::paper); g.fillRoundedRectangle (r, 6.f); g.setColour (hover ? look::ink : look::rule); g.drawRoundedRectangle (r.reduced (0.5f), 6.f, 1.2f); }
-    g.setColour (on ? look::paper : look::ink);
-    g.setFont (look::caps (small ? 9.5f : 10.5f, true, 0.1f));
-    g.drawText (label.toUpperCase(), r.reduced (2.f, 0.f).withTrimmedBottom (small ? 0.f : 12.f), juce::Justification::centred, false);
-    if (! small)
-    {
-        g.setColour (on ? look::paper.withAlpha (0.8f) : look::dim);
-        g.setFont (look::caps (8.5f, false, 0.08f));
-        g.drawText (subLabel, r.removeFromBottom (14.f), juce::Justification::centred, false);
-    }
+    if (on) { g.setColour (look::accent); g.fillRoundedRectangle (r, 8.f); }
+    else    { g.setColour (hover ? look::paper2 : look::paper); g.fillRoundedRectangle (r, 8.f); g.setColour (hover ? look::ink : look::rule); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.4f); }
+    const auto fg = on ? look::paper : look::ink, dim = on ? look::paper.withAlpha (0.8f) : look::dim;
+    g.setColour (dim);
+    g.setFont (look::caps (9.f, true, 0.1f));
+    g.drawText (noteName, r.reduced (8.f, 6.f), juce::Justification::topLeft, false);
+    g.setColour (fg);
+    g.setFont (look::caps (13.f, true, 0.1f));
+    g.drawText (label.toUpperCase(), r.reduced (6.f, 0.f), juce::Justification::centred, false);
+    g.setColour (dim);
+    g.setFont (juce::Font (juce::FontOptions (10.5f)));
+    g.drawText (tagline, r.reduced (6.f, 7.f), juce::Justification::centredBottom, false);
 }
 
 //==============================================================================
@@ -191,21 +173,32 @@ PoomseShardsEditor::PoomseShardsEditor (PoomseShardsProcessor& p) : AudioProcess
     setLookAndFeel (&laf);
     addAndMakeVisible (breakView);
 
-    // 7 kinds of damage, then 6 settings of the loop
-    makeKnob ("mutate", "Mutate"); makeKnob ("shuffle", "Shuffle"); makeKnob ("reverse", "Reverse"); makeKnob ("ramp", "Ramp");
-    makeKnob ("pitch", "Pitch"); makeKnob ("ghosts", "Ghosts"); makeKnob ("holes", "Holes");
-    makeKnob ("groove", "Groove"); makeKnob ("gate", "Gate"); makeKnob ("tune", "Tune"); makeKnob ("quant", "Start on");
-    makeKnob ("bars", "Loop length"); makeKnob ("level", "Level");
+    // seven pads: the seven white keys C D E F G A B
+    static const int notes[sh::numKeys] = { 60, 62, 64, 65, 67, 69, 71 };
+    static const char* names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* tags[sh::numKeys] = { "the loop, as it is", "taken apart", "speeds up, rises", "slows, stretches", "backwards", "like a tape", "silence, then back" };
+    for (int i = 0; i < sh::numKeys; ++i)
+    {
+        auto* pad = pads.add (new PadButton (proc, i, notes[i], sh::kKeyNames[i], juce::String (names[notes[i] % 12]) + "3", tags[i]));
+        pad->onHover = [this] (int key) { helpText = key >= 0 ? sh::kKeyHelp[key] : ""; repaint(); };
+        addAndMakeVisible (pad);
+    }
 
-    for (int i = 0; i < sh::numFills; ++i)
-        addAndMakeVisible (fillPads.add (new PadButton (proc, sh::kFillBase + i, sh::kFillNames[i], juce::String (kNoteNames[i]) + "1", true)));
-    for (int i = 0; i < sh::numFlavors; ++i)
-        addAndMakeVisible (keyPads.add (new PadButton (proc, 60 + i, sh::kFlavorNames[i], juce::String (kNoteNames[i]) + "3", false)));
+    makeKnob ("mutate", "Mutate"); makeKnob ("ramp", "Ramp"); makeKnob ("groove", "Groove"); makeKnob ("tune", "Tune");
+    makeKnob ("quant", "Start on"); makeKnob ("bars", "Loop length"); makeKnob ("level", "Level");
 
     randomButton.setComponentID ("ink");
     randomButton.onClick = [this] { proc.randomise(); };
-    editsButton.setComponentID ("pill");
-    editsButton.onClick = [this] { proc.newEdits(); };
+    rerollButton.setComponentID ("pill");
+    rerollButton.onClick = [this] { proc.reroll(); };
+    loadButton.setComponentID ("pill");
+    loadButton.onClick = [this]
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Choose a drum loop, or any sound", juce::File(), "*.wav;*.aif;*.aiff;*.aifc;*.mp3;*.flac;*.m4a;*.ogg;*.caf");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [safe = juce::Component::SafePointer<PoomseShardsEditor> (this)] (const juce::FileChooser& fc)
+                              { if (safe != nullptr && fc.getResult().existsAsFile()) safe->load (fc.getResult()); });
+    };
     resetButton.setComponentID ("pill");
     resetButton.onClick = [this]
     {
@@ -224,7 +217,7 @@ PoomseShardsEditor::PoomseShardsEditor (PoomseShardsProcessor& p) : AudioProcess
     prevPreset.setComponentID ("pill"); nextPreset.setComponentID ("pill");
     prevPreset.onClick = [this] { stepPreset (-1); };
     nextPreset.onClick = [this] { stepPreset (+1); };
-    for (auto* c : { (juce::Component*) &randomButton, (juce::Component*) &resetButton, (juce::Component*) &editsButton,
+    for (auto* c : { (juce::Component*) &randomButton, (juce::Component*) &resetButton, (juce::Component*) &rerollButton, (juce::Component*) &loadButton,
                      (juce::Component*) &prevPreset, (juce::Component*) &nextPreset, (juce::Component*) &presetBox })
         addAndMakeVisible (c);
 
@@ -236,9 +229,27 @@ PoomseShardsEditor::~PoomseShardsEditor() { stopTimer(); setLookAndFeel (nullptr
 
 void PoomseShardsEditor::timerCallback()
 {
-    const int mask = proc.getActiveFlavours();
-    for (int i = 0; i < keyPads.size(); ++i)  keyPads[i]->setLit ((mask & (1 << i)) != 0);
-    for (int i = 0; i < fillPads.size(); ++i) fillPads[i]->setLit ((mask & (0x10000 << i)) != 0);
+    const int mask = proc.getActiveKeys();
+    for (int i = 0; i < pads.size(); ++i) pads[i]->setLit ((mask & (1 << i)) != 0);
+    const int seed = proc.getSeed();
+    if (seed != shownSeed) { shownSeed = seed; repaint(); }
+}
+
+void PoomseShardsEditor::load (const juce::File& file)
+{
+    if (! proc.loadBreak (file)) breakView.showMessage ("COULD NOT READ THIS FILE (WAV, AIF, MP3, FLAC...)");
+}
+
+bool PoomseShardsEditor::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (const auto& f : files) if (juce::File (f).existsAsFile()) return true;      // whatever it is, let the reader decide
+    return false;
+}
+
+void PoomseShardsEditor::filesDropped (const juce::StringArray& files, int, int)
+{
+    breakView.setDropHover (false);
+    for (const auto& f : files) if (juce::File (f).existsAsFile()) { load (juce::File (f)); break; }
 }
 
 void PoomseShardsEditor::disarmReset() { resetArmed = false; resetButton.setButtonText ("Reset"); }
@@ -262,41 +273,35 @@ void PoomseShardsEditor::paint (juce::Graphics& g)
 
     g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
-    g.drawText ("FILLS  -  C1 TO B1", kPad, 358, 300, 12, juce::Justification::centredLeft, false);
-    g.drawText ("KEYS  -  A DIFFERENT LOOP FOR EACH (C3 TO B3)", kPad, 412, 400, 12, juce::Justification::centredLeft, false);
-    g.drawText ("WHAT GETS DAMAGED", kPad, 470, 300, 12, juce::Justification::centredLeft, false);
-    g.drawText ("THE LOOP", kPad, 582, 300, 12, juce::Justification::centredLeft, false);
+    g.drawText ("VERSION " + juce::String (shownSeed), rerollButton.getX() - 4, 50, rerollButton.getWidth() + 8, 12, juce::Justification::centred, false);
+    g.drawText ("HOLD LOOP FOR THE WHOLE CLIP - PLAY THE OTHERS ON TOP OF IT", kPad, 322, 500, 12, juce::Justification::centredLeft, false);
 
-    g.setFont (juce::Font (juce::FontOptions (11.f)));
-    g.drawText ("Hold a key: it plays the loop, taken apart differently each bar, always on the grid. Mutate = how far. Hold several keys for several loops.",
-                kPad, getHeight() - 28, getWidth() - 2 * kPad, 16, juce::Justification::centredLeft, false);
+    g.setColour (look::ink);
+    g.setFont (juce::Font (juce::FontOptions (12.5f)));
+    g.drawText (helpText.isNotEmpty() ? helpText : juce::String ("Point at a pad to see what it does. Mutate: how far BREAK takes the loop apart.  Reroll: another version of the same."),
+                kPad, getHeight() - 36, getWidth() - 2 * kPad, 20, juce::Justification::centredLeft, false);
 }
 
 void PoomseShardsEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
     resetButton.setBounds (randomButton.getX() - 10 - 80, 18, 80, 30);
-    editsButton.setBounds (resetButton.getX() - 10 - 110, 18, 110, 30);
+    rerollButton.setBounds (resetButton.getX() - 10 - 90, 18, 90, 30);
+    loadButton.setBounds (rerollButton.getX() - 10 - 70, 18, 70, 30);
     prevPreset.setBounds (kPad, 62, 26, 28);
     presetBox.setBounds (kPad + 32, 62, 250, 28);
     nextPreset.setBounds (kPad + 288, 62, 26, 28);
 
     const int contentW = getWidth() - 2 * kPad;
-    breakView.setBounds (kPad, 100, contentW, 250);
-    const int pw = contentW / 12;
-    for (int i = 0; i < fillPads.size(); ++i) fillPads[i]->setBounds (kPad + i * pw, 370, pw, 34);
-    for (int i = 0; i < keyPads.size(); ++i)  keyPads[i]->setBounds (kPad + i * pw, 426, pw, 42);
+    breakView.setBounds (kPad, 100, contentW, 212);
+    const int pw = contentW / sh::numKeys;
+    for (int i = 0; i < pads.size(); ++i) pads[i]->setBounds (kPad + i * pw, 340, pw, 104);
 
-    auto place = [&] (int from, int count, int y)
+    const int cw = contentW / knobs.size();
+    for (int i = 0; i < knobs.size(); ++i)
     {
-        const int cw = contentW / count;
-        for (int i = 0; i < count; ++i)
-        {
-            juce::Rectangle<int> cell (kPad + i * cw, y, cw, 96);
-            knobs[from + i]->name.setBounds (cell.removeFromTop (14));
-            knobs[from + i]->slider.setBounds (cell);
-        }
-    };
-    place (0, 7, 482);
-    place (7, 6, 596);
+        juce::Rectangle<int> cell (kPad + i * cw, 462, cw, 130);
+        knobs[i]->name.setBounds (cell.removeFromTop (16));
+        knobs[i]->slider.setBounds (cell);
+    }
 }

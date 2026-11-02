@@ -43,7 +43,8 @@ public:
 
     void uiNote (int note, bool on);                      // the pads of the interface play like keys
     void randomise();
-    void newEdits();                                      // another seed: the same bar breaks in other ways
+    void reroll();                                        // another version: the same settings, the dice thrown again
+    int getSeed() const { return (int) apvts.getRawParameterValue ("seed")->load(); }
     void resetToDefaults();
     static int getNumPresets();
     static juce::String getPresetName (int i);
@@ -54,7 +55,7 @@ public:
     int getHitCount() const { return engine.hitCount(); }
     int getHit (int i) const { return engine.hitAt (i); }
     float getLoopPhase() const { return engine.loopPhase(); }
-    int getActiveFlavours() const { return engine.activeFlavours(); }
+    int getActiveKeys() const { return engine.activeKeys(); }
 
     juce::AudioProcessorValueTreeState apvts;
 

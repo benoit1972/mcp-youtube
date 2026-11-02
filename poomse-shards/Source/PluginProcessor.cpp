@@ -6,8 +6,8 @@ namespace
 {
 using Range = juce::NormalisableRange<float>;
 // index into raw[]: the order of the parameters below
-enum { pMutate, pShuffle, pReverse, pRamp, pPitch, pGhosts, pHoles, pGroove, pGate, pTune, pQuant, pBars, pLevel, pSeed, numRaw };
-const char* const kIds[numRaw] = { "mutate", "shuffle", "reverse", "ramp", "pitch", "ghosts", "holes", "groove", "gate", "tune", "quant", "bars", "level", "seed" };
+enum { pMutate, pRamp, pGroove, pTune, pQuant, pBars, pLevel, pSeed, numRaw };
+const char* const kIds[numRaw] = { "mutate", "ramp", "groove", "tune", "quant", "bars", "level", "seed" };
 
 struct PresetParam { const char* id; float value; };
 struct Preset { const char* name; std::vector<PresetParam> params; };
@@ -15,13 +15,12 @@ const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
         { "Init", {} },
-        { "Barely There",     { { "mutate", 0.2f }, { "shuffle", 0.3f }, { "reverse", 0.2f }, { "pitch", 0.2f }, { "ghosts", 0.6f }, { "holes", 0.2f }, { "ramp", 0.3f } } },
-        { "Loose Hat",        { { "mutate", 0.4f }, { "ghosts", 0.9f }, { "shuffle", 0.4f }, { "reverse", 0.2f }, { "pitch", 0.2f }, { "holes", 0.3f }, { "gate", 0.7f } } },
-        { "Rolls and Bends",  { { "mutate", 0.6f }, { "ramp", 0.9f }, { "pitch", 0.8f }, { "ghosts", 0.4f }, { "shuffle", 0.4f }, { "gate", 0.8f } } },
-        { "Backwards Room",   { { "mutate", 0.7f }, { "reverse", 1.f }, { "shuffle", 0.7f }, { "holes", 0.6f }, { "ramp", -0.4f }, { "pitch", 0.3f } } },
-        { "Another Loop",     { { "mutate", 1.f }, { "shuffle", 0.9f }, { "reverse", 0.7f }, { "pitch", 0.7f }, { "ghosts", 0.8f }, { "holes", 0.6f }, { "ramp", 0.8f } } },
-        { "Snapped",          { { "mutate", 0.5f }, { "groove", 0.f }, { "gate", 0.5f }, { "ghosts", 0.7f }, { "shuffle", 0.6f }, { "pitch", 0.1f } } },
-        { "Slow Motion",      { { "mutate", 0.5f }, { "tune", -6.f }, { "gate", 1.f }, { "ramp", -0.7f }, { "holes", 0.7f }, { "reverse", 0.5f } } },
+        { "Barely There",    { { "mutate", 0.12f }, { "ramp", 0.4f } } },
+        { "Loose",           { { "mutate", 0.3f }, { "ramp", 0.5f }, { "groove", 1.f } } },
+        { "Rolls and Bends", { { "mutate", 0.5f }, { "ramp", 1.f } } },
+        { "Another Loop",    { { "mutate", 1.f }, { "ramp", 0.8f } } },
+        { "Snapped",         { { "mutate", 0.5f }, { "groove", 0.f }, { "ramp", 0.6f } } },
+        { "Slow Motion",     { { "mutate", 0.5f }, { "tune", -6.f }, { "ramp", 0.9f } } },
     };
     return list;
 }
@@ -44,19 +43,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseShardsProcessor::creat
     auto pct = [] (float x, int) { return juce::String (juce::roundToInt (x * 100.f)) + " %"; };
 
     l.add (std::make_unique<F> (id ("mutate"),  "Mutate",  Range (0.f, 1.f, 0.001f), 0.45f, attr (pct)));
-    l.add (std::make_unique<F> (id ("shuffle"), "Shuffle", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
-    l.add (std::make_unique<F> (id ("reverse"), "Reverse", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
-    l.add (std::make_unique<F> (id ("ramp"),    "Ramp",    Range (-1.f, 1.f, 0.001f), 0.5f, attr (pct)));
-    l.add (std::make_unique<F> (id ("pitch"),   "Pitch",   Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
-    l.add (std::make_unique<F> (id ("ghosts"),  "Ghosts",  Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
-    l.add (std::make_unique<F> (id ("holes"),   "Holes",   Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
+    l.add (std::make_unique<F> (id ("ramp"),    "Ramp",    Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
     l.add (std::make_unique<F> (id ("groove"),  "Groove",  Range (0.f, 1.f, 0.001f), 1.f, attr (pct)));
-    l.add (std::make_unique<F> (id ("gate"),    "Gate",    Range (0.1f, 1.f, 0.001f), 0.9f, attr (pct)));
     l.add (std::make_unique<F> (id ("tune"),    "Tune",    Range (-12.f, 12.f, 0.01f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " st"; })));
     l.add (std::make_unique<juce::AudioParameterChoice> (id ("quant"), "Start on", juce::StringArray { "At once", "1/4", "1/8", "1/16" }, 3));
     l.add (std::make_unique<juce::AudioParameterChoice> (id ("bars"), "Loop length", juce::StringArray { "1 bar", "2 bars", "4 bars", "8 bars" }, 1));
     l.add (std::make_unique<F> (id ("level"),   "Level",   Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
-    l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Edits (seed)", 1, 999, 1));
+    l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version", 1, 999, 1));
     return l;
 }
 
@@ -74,9 +67,8 @@ juce::String PoomseShardsProcessor::getPresetName (int i) { return presets()[(si
 sh::Params PoomseShardsProcessor::readParams() const
 {
     sh::Params p;
-    p.mutate = raw[pMutate]->load();   p.shuffle = raw[pShuffle]->load(); p.reverse = raw[pReverse]->load(); p.ramp = raw[pRamp]->load();
-    p.pitch = raw[pPitch]->load();     p.ghosts = raw[pGhosts]->load();   p.holes = raw[pHoles]->load();     p.groove = raw[pGroove]->load();
-    p.gate = raw[pGate]->load();       p.tune = raw[pTune]->load();       p.quant = (int) raw[pQuant]->load(); p.seed = (int) raw[pSeed]->load();
+    p.mutate = raw[pMutate]->load(); p.ramp = raw[pRamp]->load();   p.groove = raw[pGroove]->load(); p.tune = raw[pTune]->load();
+    p.quant = (int) raw[pQuant]->load(); p.seed = (int) raw[pSeed]->load();
     return p;
 }
 
@@ -257,12 +249,11 @@ void PoomseShardsProcessor::randomise()
     {
         if (auto* p = apvts.getParameter (id)) { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 (v)); p->endChangeGesture(); }
     };
-    auto between = [&] (float lo, float hi) { return lo + (hi - lo) * rng.nextFloat(); };
-    set ("mutate", between (0.2f, 0.9f)); set ("shuffle", between (0.1f, 1.f)); set ("reverse", between (0.f, 1.f)); set ("ramp", between (-0.8f, 1.f));
-    set ("pitch", between (0.f, 0.9f));   set ("ghosts", between (0.1f, 1.f));  set ("holes", between (0.f, 0.8f));
+    set ("mutate", 0.15f + 0.8f * rng.nextFloat()); set ("ramp", 0.2f + 0.8f * rng.nextFloat());
+    reroll();
 }
 
-void PoomseShardsProcessor::newEdits()
+void PoomseShardsProcessor::reroll()
 {
     if (auto* p = apvts.getParameter ("seed"))
     {
