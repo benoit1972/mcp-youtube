@@ -1,4 +1,5 @@
 // JUCE-free tests for the break cutter and the loop player. Build: g++ -std=c++17 -O2 -fsanitize=address,undefined tests/dsp_test.cpp
+#include "../Source/Dsp/Aiff.h"
 #include "../Source/Dsp/Engine.h"
 #include <chrono>
 #include <cstdio>
@@ -430,6 +431,78 @@ int main()
         }
         std::printf ("500 random key presses: peak %.3f, voices %d, hits ringing %d\n", pk, r.e.activeVoices(), r.e.activeHits());
         CHECK (finite && pk <= 1.0f);
+    }
+    // ---- the AIFF reader: the variants that sample packs use ----
+    {
+        struct Make
+        {
+            bool aifc = false, little = false, isFloat = false, extraChunks = false, truncate = false, oddComm = false;
+            std::string comp = "NONE"; int bits = 16, channels = 2; double rate = 44100.0; std::vector<double> frames;   // interleaved, -1..1
+        };
+        auto put32 = [] (std::vector<uint8_t>& v, uint32_t x) { for (int i = 3; i >= 0; --i) v.push_back ((uint8_t) (x >> (8 * i))); };
+        auto put16 = [] (std::vector<uint8_t>& v, uint32_t x) { v.push_back ((uint8_t) (x >> 8)); v.push_back ((uint8_t) x); };
+        auto putTag = [] (std::vector<uint8_t>& v, const char* t) { for (int i = 0; i < 4; ++i) v.push_back ((uint8_t) t[i]); };
+        auto build = [&] (const Make& m)
+        {
+            std::vector<uint8_t> comm;
+            put16 (comm, (uint32_t) m.channels); put32 (comm, (uint32_t) (m.frames.size() / (size_t) m.channels)); put16 (comm, (uint32_t) m.bits);
+            int e; const double mant = std::frexp (m.rate, &e);
+            put16 (comm, (uint32_t) (e - 1 + 16383)); const uint64_t mm = (uint64_t) std::ldexp (mant, 64); put32 (comm, (uint32_t) (mm >> 32)); put32 (comm, (uint32_t) mm);
+            if (m.aifc) { putTag (comm, m.comp.c_str()); comm.push_back (4); for (char c : std::string ("none")) comm.push_back ((uint8_t) c); comm.push_back (0); }
+            std::vector<uint8_t> ssnd; put32 (ssnd, m.extraChunks ? 8u : 0u); put32 (ssnd, 0);
+            if (m.extraChunks) for (int i = 0; i < 8; ++i) ssnd.push_back (0x55);     // junk before the sound (the SSND offset)
+            for (double x : m.frames)
+            {
+                if (m.isFloat) { float f = (float) x; uint32_t u; std::memcpy (&u, &f, 4); put32 (ssnd, u); continue; }
+                const int bytes = (m.bits + 7) / 8; const int64_t scale = (int64_t) 1 << (bytes * 8 - 1);
+                int64_t q = (int64_t) std::llround (x * (double) (scale - 1));
+                for (int b = 0; b < bytes; ++b) ssnd.push_back ((uint8_t) (q >> (8 * (m.little ? b : bytes - 1 - b))));
+            }
+            std::vector<uint8_t> out; putTag (out, "FORM"); put32 (out, 0); putTag (out, m.aifc ? "AIFC" : "AIFF");
+            if (m.aifc) { putTag (out, "FVER"); put32 (out, 4); put32 (out, 0xA2805140u); }
+            if (m.extraChunks) { putTag (out, "ANNO"); put32 (out, 5); for (int i = 0; i < 5; ++i) out.push_back ('a'); out.push_back (0); }   // an odd chunk, padded
+            putTag (out, "COMM"); put32 (out, (uint32_t) comm.size()); out.insert (out.end(), comm.begin(), comm.end());
+            putTag (out, "SSND"); put32 (out, (uint32_t) ssnd.size() + (m.truncate ? 5000u : 0u)); out.insert (out.end(), ssnd.begin(), ssnd.end());
+            if (m.extraChunks) { if (ssnd.size() & 1) out.push_back (0); putTag (out, "ID3 "); put32 (out, 3); for (int i = 0; i < 3; ++i) out.push_back ('x'); out.push_back (0); }
+            const uint32_t total = (uint32_t) out.size() - 8; out[4] = (uint8_t) (total >> 24); out[5] = (uint8_t) (total >> 16); out[6] = (uint8_t) (total >> 8); out[7] = (uint8_t) total;
+            return out;
+        };
+        auto tone = [] (int channels, int frames, double rate)
+        {
+            std::vector<double> v;
+            for (int i = 0; i < frames; ++i) for (int c = 0; c < channels; ++c) v.push_back (0.6 * std::sin (6.283185307179586 * 440.0 * (c + 1) * i / rate));
+            return v;
+        };
+        auto expectMono = [] (const std::vector<double>& frames, int channels, size_t i) { double s = 0; for (int c = 0; c < channels; ++c) s += frames[i * (size_t) channels + (size_t) c]; return s / channels; };
+        struct Case { const char* name; Make m; };
+        std::vector<Case> cases;
+        { Make m; m.frames = tone (2, 4000, 44100.0); cases.push_back ({ "AIFF 16-bit stereo 44.1k", m }); }
+        { Make m; m.bits = 24; m.channels = 1; m.rate = 48000.0; m.frames = tone (1, 4000, 48000.0); cases.push_back ({ "AIFF 24-bit mono 48k", m }); }
+        { Make m; m.bits = 32; m.rate = 96000.0; m.frames = tone (2, 4000, 96000.0); cases.push_back ({ "AIFF 32-bit stereo 96k", m }); }
+        { Make m; m.bits = 8; m.channels = 1; m.rate = 22050.0; m.frames = tone (1, 4000, 22050.0); cases.push_back ({ "AIFF 8-bit mono 22k", m }); }
+        { Make m; m.aifc = true; m.comp = "sowt"; m.little = true; m.frames = tone (2, 4000, 44100.0); cases.push_back ({ "AIFC sowt (little-endian) 16-bit", m }); }
+        { Make m; m.aifc = true; m.comp = "sowt"; m.little = true; m.bits = 24; m.rate = 88200.0; m.frames = tone (2, 4000, 88200.0); cases.push_back ({ "AIFC sowt 24-bit 88.2k", m }); }
+        { Make m; m.aifc = true; m.comp = "fl32"; m.isFloat = true; m.bits = 32; m.frames = tone (2, 4000, 44100.0); cases.push_back ({ "AIFC fl32 float", m }); }
+        { Make m; m.extraChunks = true; m.frames = tone (2, 4000, 44100.0); cases.push_back ({ "AIFF with odd chunks, an SSND offset and an ID3 chunk", m }); }
+        { Make m; m.truncate = true; m.frames = tone (2, 4000, 44100.0); cases.push_back ({ "AIFF whose SSND claims more than the file holds", m }); }
+        for (const auto& cs : cases)
+        {
+            auto bytes = build (cs.m);
+            auto r = sh::parseAiff (bytes.data(), bytes.size());
+            bool ok = r.ok && r.channels == cs.m.channels && std::abs (r.sampleRate - cs.m.rate) < 0.5 && r.mono.size() == cs.m.frames.size() / (size_t) cs.m.channels;
+            double worst = 0.0;
+            if (ok) for (size_t i = 0; i < r.mono.size(); ++i) worst = std::max (worst, std::abs ((double) r.mono[i] - expectMono (cs.m.frames, cs.m.channels, i)));
+            std::printf ("AIFF reader: %-52s %s (%s, %.0f Hz, worst error %.5f)\n", cs.name, ok ? "ok" : "FAILED", r.format.c_str(), r.sampleRate, worst);
+            CHECK (ok && worst < (cs.m.bits == 8 ? 0.02 : 0.001));
+        }
+        // what it cannot read, it explains
+        { Make m; m.aifc = true; m.comp = "ima4"; m.frames = tone (2, 400, 44100.0); auto b = build (m); auto r = sh::parseAiff (b.data(), b.size());
+          std::printf ("  unsupported compression: %s\n", r.why.c_str()); CHECK (! r.ok && r.why.find ("ima4") != std::string::npos); }
+        { std::vector<uint8_t> b = { 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 1, 2, 3, 4 }; auto r = sh::parseAiff (b.data(), b.size());
+          std::printf ("  not an AIFF: %s\n", r.why.c_str()); CHECK (! r.ok && r.why.find ("RIFF") != std::string::npos); }
+        { auto r = sh::parseAiff (nullptr, 0); std::printf ("  empty: %s\n", r.why.c_str()); CHECK (! r.ok && r.why.find ("EMPTY") != std::string::npos); }
+        { std::vector<uint8_t> b (200, 7); b[0] = 'F'; b[1] = 'O'; b[2] = 'R'; b[3] = 'M'; auto r = sh::parseAiff (b.data(), b.size()); CHECK (! r.ok); }   // garbage must never crash
+        { gg::Rng g (11); for (int i = 0; i < 300; ++i) { std::vector<uint8_t> b ((size_t) (g.uni() * 300.f) + 1); for (auto& x : b) x = (uint8_t) (g.uni() * 255.f); if (b.size() > 12 && i % 2) { std::memcpy (b.data(), "FORM", 4); std::memcpy (b.data() + 8, i % 4 == 1 ? "AIFF" : "AIFC", 4); } sh::parseAiff (b.data(), b.size()); } }
     }
     std::printf (failures ? "%d FAILURES\n" : "ALL TESTS PASSED\n", failures);
     return failures ? 1 : 0;

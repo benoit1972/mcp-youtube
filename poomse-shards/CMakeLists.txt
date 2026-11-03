@@ -42,7 +42,7 @@ target_sources(PoomseShards PRIVATE
   Source/PluginProcessor.cpp Source/PluginProcessor.h
   Source/PluginEditor.cpp Source/PluginEditor.h
   Source/Look.h
-  Source/Dsp/Rng.h Source/Dsp/Kit.h Source/Dsp/Engine.h)
+  Source/Dsp/Rng.h Source/Dsp/Kit.h Source/Dsp/Aiff.h Source/Dsp/Engine.h)
 
 target_compile_definitions(PoomseShards PUBLIC
   JUCE_WEB_BROWSER=0

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Dsp/Aiff.h"
 #include <mutex>
 
 namespace
@@ -139,30 +140,46 @@ juce::Result PoomseShardsProcessor::readBreak (const juce::File& file, Loaded& o
     for (int attempt = 0; attempt < std::max (1, attempts); ++attempt)
     {
         if (attempt > 0) juce::Thread::sleep (700);       // (a file that is still arriving from iCloud, or a permission that has just been granted)
-        juce::AudioFormatManager fm;
-        fm.registerBasicFormats();
-        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
-        if (reader == nullptr)
+        std::vector<float> mono; double rate = 0.0; int channels = 0, bits = 0; juce::String format;
         {
-            why = file.existsAsFile() ? "CANNOT READ " + file.getFileName().toUpperCase() + " (A FORMAT THIS PLUGIN DOES NOT KNOW, OR THE FILE IS NOT READABLE)"
-                                      : file.getFileName().toUpperCase() + " IS NOT THERE (YET?)";
-            continue;
+            juce::AudioFormatManager fm;
+            fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+            if (reader != nullptr && reader->sampleRate > 0.0 && reader->lengthInSamples > 0)
+            {
+                const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
+                juce::AudioBuffer<float> tmp (2, len);
+                tmp.clear();
+                if (! reader->read (&tmp, 0, len, 0, true, true)) { why = "COULD NOT READ THE AUDIO IN " + file.getFileName().toUpperCase(); continue; }
+                mono.resize ((size_t) len);
+                const float* l = tmp.getReadPointer (0);
+                const float* r = tmp.getReadPointer (reader->numChannels > 1 ? 1 : 0);
+                for (int i = 0; i < len; ++i) mono[(size_t) i] = 0.5f * (l[i] + r[i]);
+                rate = reader->sampleRate; channels = (int) reader->numChannels; bits = (int) reader->bitsPerSample; format = reader->getFormatName();
+            }
+            else
+            {
+                // the audio library does not know this file: our own reader for AIFF and AIFF-C takes over, and explains if it cannot either
+                juce::MemoryBlock bytes;
+                if (! file.existsAsFile()) { why = file.getFileName().toUpperCase() + " IS NOT THERE (YET?)"; continue; }
+                if (! file.loadFileAsData (bytes)) { why = "CANNOT OPEN " + file.getFileName().toUpperCase() + " (NO PERMISSION? OR STILL ARRIVING FROM ICLOUD?)"; continue; }
+                const auto aiff = sh::parseAiff (static_cast<const uint8_t*> (bytes.getData()), bytes.getSize());
+                if (! aiff.ok)
+                {
+                    why = "CANNOT READ " + file.getFileName().toUpperCase() + ": " + juce::String (aiff.why) + "  [" + juce::String ((juce::int64) bytes.getSize()) + " BYTES]";
+                    if (bytes.getSize() == 0) continue;                  // empty: it may be on its way
+                    return juce::Result::fail (why);                     // a format we do not know does not get better with time
+                }
+                mono = aiff.mono; rate = aiff.sampleRate; channels = aiff.channels; bits = aiff.bits; format = juce::String (aiff.format);
+            }
         }
-        if (reader->sampleRate <= 0.0 || reader->lengthInSamples < 4096) return juce::Result::fail (file.getFileName().toUpperCase() + " IS TOO SHORT");
-
-        const int len = (int) juce::jmin<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 60.0));
-        juce::AudioBuffer<float> tmp (2, len);
-        tmp.clear();
-        if (! reader->read (&tmp, 0, len, 0, true, true)) { why = "COULD NOT READ THE AUDIO IN " + file.getFileName().toUpperCase(); continue; }
+        if (mono.size() < 4096) return juce::Result::fail (file.getFileName().toUpperCase() + " IS TOO SHORT");
 
         auto k = std::make_shared<sh::Kit>();
-        k->sampleRate = reader->sampleRate;
-        k->x.resize ((size_t) len);
-        const float* a = tmp.getReadPointer (0);
-        const float* b = tmp.getReadPointer (reader->numChannels > 1 ? 1 : 0);
-        for (int i = 0; i < len; ++i) k->x[(size_t) i] = 0.5f * (a[i] + b[i]);
+        k->sampleRate = rate;
+        k->x = std::move (mono);
         // cut the trailing silence so that the length of the file is the length of the loop
-        int end = len;
+        int end = (int) k->x.size();
         while (end > 1000 && std::abs (k->x[(size_t) end - 1]) < 0.002f) --end;
         k->x.resize ((size_t) end);
         k->analyse();                       // cut the break into its hits
@@ -178,8 +195,8 @@ juce::Result PoomseShardsProcessor::readBreak (const juce::File& file, Loaded& o
             if (score < bestScore) { bestScore = score; best = i; }
         }
         out.kit = k; out.bars = best;
-        out.info = file.getFileName().toUpperCase() + " - " + juce::String (seconds, 1) + " S - " + juce::String ((int) reader->numChannels) + " CH - "
-                   + juce::String (juce::roundToInt (reader->sampleRate)) + " HZ - " + juce::String ((int) reader->bitsPerSample) + " BIT - " + juce::String ((int) k->slices.size()) + " HITS";
+        out.info = file.getFileName().toUpperCase() + " - " + format.toUpperCase() + " - " + juce::String (seconds, 1) + " S - " + juce::String (channels) + " CH - "
+                   + juce::String (juce::roundToInt (rate)) + " HZ - " + juce::String (bits) + " BIT - " + juce::String ((int) k->slices.size()) + " HITS";
         return juce::Result::ok();
     }
     return juce::Result::fail (why);

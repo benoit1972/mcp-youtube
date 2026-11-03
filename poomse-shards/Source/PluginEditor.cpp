@@ -116,12 +116,12 @@ void BreakView::paint (juce::Graphics& g)
     // words
     g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
-    g.drawText ("BRIGHT  -  HATS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topRight, false);
+    if (message.isEmpty()) g.drawText ("BRIGHT  -  HATS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topRight, false);
     g.drawText ("DARK  -  KICKS", mapR.reduced (kInset + 2.f, 6.f), juce::Justification::bottomRight, false);
     const juce::String head = message.isNotEmpty() ? message
         : name.toUpperCase() + "   -   " + juce::String (view.marks.size()) + " HITS FOUND";
     g.setColour (message.isNotEmpty() ? look::accent : look::ink);
-    g.drawText (head, mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topLeft, false);
+    g.drawText (head, mapR.reduced (kInset + 2.f, 6.f), juce::Justification::topLeft, true);
 
     if (dropHover)
     {
