@@ -1,0 +1,75 @@
+name: Build Poomse Phase (Audio Unit)
+
+on:
+  push:
+    branches: [claude/plugin-format-au-s4g5da]
+    paths: ['poomse-phase/**', '!poomse-phase/release/**', '.github/workflows/build-phase.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: poomse-phase
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate Audio Unit (auval)
+        continue-on-error: true
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Phs1 Benp
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          COMP="$(find build -name 'Poomse Phase.component' -maxdepth 6 | head -1)"
+          echo "component: $COMP"
+          ditto -c -k --keepParent "$COMP" "dist/PoomsePhase-AU-macOS.zip"
+          cat > dist/INSTALL.txt <<'TXT'
+          1. Dézippez PoomsePhase-AU-macOS.zip : vous obtenez "Poomse Phase.component".
+          2. Copiez-le dans /Library/Audio/Plug-Ins/Components/ (Finder > Aller > Aller au dossier...).
+          3. Le plugin n'est pas signé par Apple : dans le Terminal, lancez
+             sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Poomse Phase.component"
+          4. Relancez Ableton Live (Réglages > Plug-ins > Rescanner avec Option) : c'est un INSTRUMENT,
+             dans Plug-ins > Audio Units > Benoit > Poomse Phase (piste MIDI).
+          TXT
+
+      - name: Publish the zip into the repository (poomse-phase/release)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p /tmp/pub && cp poomse-phase/dist/PoomsePhase-AU-macOS.zip poomse-phase/dist/INSTALL.txt /tmp/pub/
+          for i in 1 2 3 4 5; do
+            # start again from the latest state of the branch each time: a zip is binary, there is nothing to merge
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+            git rm -rq --ignore-unmatch poomse-phase/release
+            mkdir -p poomse-phase/release
+            cp /tmp/pub/PoomsePhase-AU-macOS.zip /tmp/pub/INSTALL.txt poomse-phase/release/
+            git add poomse-phase/release
+            git commit -m "Publish built Poomse Phase zip" || exit 0
+            git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep $((i * 5))
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoomsePhase-AU-macOS
+          path: poomse-phase/dist/*
