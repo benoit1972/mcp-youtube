@@ -135,6 +135,7 @@ void PoomseWarpProcessor::randomise()
     set ("warp", rng.nextFloat()); set ("twist", rng.nextFloat() < 0.5f ? 0.f : rng.nextFloat() * 0.8f); set ("ratio", (float) rng.nextInt (7));
     set ("pluck", rng.nextFloat()); set ("cutoff", 0.4f + 0.6f * rng.nextFloat()); set ("reso", 0.6f * rng.nextFloat());
     set ("decay", rng.nextFloat()); set ("sustain", rng.nextFloat()); set ("release", 0.7f * rng.nextFloat());
+    set ("detune", 0.7f * rng.nextFloat()); set ("space", 0.7f * rng.nextFloat());
 }
 
 void PoomseWarpProcessor::resetToDefaults()
