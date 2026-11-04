@@ -8,7 +8,7 @@ void WaveView::paint (juce::Graphics& g)
     g.setColour (look::paper2);
     g.fillRoundedRectangle (all, 6.f);
     const auto m = all.reduced (16.f, 14.f);
-    const float warp = *proc.apvts.getRawParameterValue ("warp"), twist = *proc.apvts.getRawParameterValue ("twist");
+    const float warp = *proc.apvts.getRawParameterValue ("warp"), twist = *proc.apvts.getRawParameterValue ("twist"), fold = *proc.apvts.getRawParameterValue ("fold");
     const float ratio = wp::kRatios[std::clamp ((int) *proc.apvts.getRawParameterValue ("ratio"), 0, 6)];
     g.setColour (look::rule);
     g.fillRect (m.getX(), m.getCentreY() - 0.5f, m.getWidth(), 1.f);
@@ -18,7 +18,7 @@ void WaveView::paint (juce::Graphics& g)
     {
         const float ph = (float) i / (float) N;
         float mp = ph * ratio; mp -= std::floor (mp);
-        const float y = wp::shape (std::min (ph, 0.9999f), mp, warp, twist);
+        const float y = wp::shape (std::min (ph, 0.9999f), mp, warp, twist, fold);
         const float px = m.getX() + ph * m.getWidth(), py = m.getCentreY() - y * m.getHeight() * 0.46f;
         if (i == 0) path.startNewSubPath (px, py); else path.lineTo (px, py);
     }
