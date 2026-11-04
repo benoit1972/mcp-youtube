@@ -4,8 +4,8 @@
 namespace
 {
 using Range = juce::NormalisableRange<float>;
-enum { pTime, pPitchL, pPitchR, pFeedback, pTone, pMix, pLevel, pHold, numRaw };
-const char* const kIds[numRaw] = { "time", "pitchL", "pitchR", "feedback", "tone", "mix", "level", "hold" };
+enum { pTime, pPitchL, pPitchR, pFeedback, pTone, pDrive, pDrift, pSmear, pMix, pLevel, pHold, numRaw };
+const char* const kIds[numRaw] = { "time", "pitchL", "pitchR", "feedback", "tone", "drive", "drift", "smear", "mix", "level", "hold" };
 
 struct PresetParam { const char* id; float value; };
 struct Preset { const char* name; std::vector<PresetParam> params; };
@@ -13,11 +13,11 @@ const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
         { "Init", {} },
-        { "Rising Spiral", { { "time", 2 }, { "pitchL", 7.f }, { "pitchR", 7.f }, { "feedback", 0.7f }, { "tone", 0.6f } } },
-        { "Falling Away",  { { "time", 3 }, { "pitchL", -12.f }, { "pitchR", -12.f }, { "feedback", 0.65f }, { "tone", 0.4f } } },
-        { "Octave Shimmer",{ { "time", 1 }, { "pitchL", 12.f }, { "pitchR", 12.f }, { "feedback", 0.6f }, { "mix", 0.4f } } },
-        { "Stereo Fifth",  { { "time", 2 }, { "pitchL", 7.f }, { "pitchR", -5.f }, { "feedback", 0.6f } } },
-        { "Slow Wash",     { { "time", 5 }, { "pitchL", 2.f }, { "pitchR", -2.f }, { "feedback", 0.85f }, { "tone", 0.35f }, { "mix", 0.6f } } },
+        { "Rising Spiral", { { "time", 2 }, { "pitchL", 7.f }, { "pitchR", 7.f }, { "feedback", 0.7f }, { "drift", 0.2f } } },
+        { "Falling Away",  { { "time", 3 }, { "pitchL", -12.f }, { "pitchR", -12.f }, { "feedback", 0.65f }, { "tone", 0.4f }, { "drive", 0.5f } } },
+        { "Octave Shimmer",{ { "time", 1 }, { "pitchL", 12.f }, { "pitchR", 12.f }, { "feedback", 0.6f }, { "mix", 0.4f }, { "smear", 0.8f }, { "drive", 0.1f } } },
+        { "Robot Echo",    { { "time", 0 }, { "pitchL", 3.f }, { "pitchR", -3.f }, { "feedback", 0.7f }, { "smear", 0.f }, { "drive", 0.6f }, { "drift", 0.f } } },
+        { "Tape Wash",     { { "time", 5 }, { "pitchL", 2.f }, { "pitchR", -2.f }, { "feedback", 0.85f }, { "tone", 0.35f }, { "mix", 0.6f }, { "smear", 1.f }, { "drift", 0.8f }, { "drive", 0.4f } } },
     };
     return list;
 }
@@ -33,10 +33,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseSpiralProcessor::creat
 
     l.add (std::make_unique<juce::AudioParameterChoice> (id ("time"), "Time", juce::StringArray { "1/16", "1/8", "1/8.", "1/4", "1/2", "1 bar" }, 2));
     auto st = [] (float x, int) { return juce::String (x, 1) + " st"; };
-    l.add (std::make_unique<F> (id ("pitchL"), "Pitch L", Range (-24.f, 24.f, 0.01f), 0.f, attr (st)));
-    l.add (std::make_unique<F> (id ("pitchR"), "Pitch R", Range (-24.f, 24.f, 0.01f), 0.f, attr (st)));
-    l.add (std::make_unique<F> (id ("feedback"), "Feedback", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
+    l.add (std::make_unique<F> (id ("pitchL"), "Pitch L", Range (-24.f, 24.f, 0.01f), 7.f, attr (st)));
+    l.add (std::make_unique<F> (id ("pitchR"), "Pitch R", Range (-24.f, 24.f, 0.01f), -5.f, attr (st)));
+    l.add (std::make_unique<F> (id ("feedback"), "Feedback", Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
     l.add (std::make_unique<F> (id ("tone"), "Tone", Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
+    l.add (std::make_unique<F> (id ("drive"), "Drive", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<F> (id ("drift"), "Drift", Range (0.f, 1.f, 0.001f), 0.35f, attr (pct)));
+    l.add (std::make_unique<F> (id ("smear"), "Smear", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
     l.add (std::make_unique<F> (id ("mix"), "Mix", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
     l.add (std::make_unique<F> (id ("level"), "Level", Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
     l.add (std::make_unique<juce::AudioParameterBool> (id ("hold"), "Hold", false));
@@ -57,7 +60,7 @@ sp::Params PoomseSpiralProcessor::readParams() const
 {
     sp::Params p;
     p.time = (int) raw[pTime]->load(); p.pitchL = raw[pPitchL]->load(); p.pitchR = raw[pPitchR]->load(); p.feedback = raw[pFeedback]->load();
-    p.tone = raw[pTone]->load(); p.mix = raw[pMix]->load(); p.hold = raw[pHold]->load() > 0.5f;
+    p.tone = raw[pTone]->load(); p.drive = raw[pDrive]->load(); p.drift = raw[pDrift]->load(); p.smear = raw[pSmear]->load(); p.mix = raw[pMix]->load(); p.hold = raw[pHold]->load() > 0.5f;
     return p;
 }
 
@@ -98,6 +101,7 @@ void PoomseSpiralProcessor::randomise()
     static const float steps[] = { -12.f, -7.f, -5.f, -2.f, 0.f, 2.f, 5.f, 7.f, 12.f };
     set ("time", (float) rng.nextInt (6)); set ("pitchL", steps[rng.nextInt (9)]); set ("pitchR", steps[rng.nextInt (9)]);
     set ("feedback", 0.3f + 0.55f * rng.nextFloat()); set ("tone", 0.3f + 0.6f * rng.nextFloat());
+    set ("drive", rng.nextFloat()); set ("drift", rng.nextFloat()); set ("smear", rng.nextFloat()); set ("mix", 0.3f + 0.5f * rng.nextFloat());
 }
 
 void PoomseSpiralProcessor::resetToDefaults()

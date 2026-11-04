@@ -1,6 +1,6 @@
 #include "PluginEditor.h"
 
-namespace { constexpr int kWidth = 780, kHeight = 520, kPad = 28; constexpr float kInset = 12.f; }
+namespace { constexpr int kWidth = 780, kHeight = 590, kPad = 28; constexpr float kInset = 12.f; }
 
 void EchoView::paint (juce::Graphics& g)
 {
@@ -50,6 +50,9 @@ PoomseSpiralEditor::PoomseSpiralEditor (PoomseSpiralProcessor& p) : AudioProcess
     makeKnob ("pitchR", "Pitch R", "The same for the right echoes. Different values make a wide, spiralling stereo.");
     makeKnob ("feedback", "Feedback", "How many times the echoes go round.");
     makeKnob ("tone", "Tone", "Dark on the left: every pass loses some brightness.");
+    makeKnob ("drive", "Drive", "Warm saturation inside the loop: each pass gets a little dirtier.");
+    makeKnob ("drift", "Drift", "A slow tape-like wobble of the delay time, different on each side.");
+    makeKnob ("smear", "Smear", "Small: grainy, robotic echoes. Large: soft, diffuse, almost a reverb.");
     makeKnob ("mix", "Mix", "Dry sound on the left, echoes on the right.");
     makeKnob ("level", "Level", "Output level.");
 
@@ -127,10 +130,10 @@ void PoomseSpiralEditor::resized()
 
     const int contentW = getWidth() - 2 * kPad;
     view.setBounds (kPad, 104, contentW, 220);
-    const int cw = contentW / 7;
+    const int cw = contentW / 5;
     for (int i = 0; i < knobs.size(); ++i)
     {
-        juce::Rectangle<int> cell (kPad + i * cw, 350, cw, 120);
+        juce::Rectangle<int> cell (kPad + (i % 5) * cw, 330 + (i / 5) * 110, cw, 110);
         knobs[i]->name.setBounds (cell.removeFromTop (16));
         knobs[i]->slider.setBounds (cell);
     }

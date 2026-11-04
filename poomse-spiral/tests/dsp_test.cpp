@@ -54,12 +54,21 @@ int main()
         // and let go of hold: the echoes die again
         h.p.hold = false; h.go (20.0, [] (long) { return 0.f; }); CHECK (peakOf (h.out, h.out.size() - 4800) < 0.02f);
     }
+    // character: drive keeps the loop bounded, drift moves the echoes, smear changes the window
+    {
+        Run a, b; a.p.mix = b.p.mix = 1.f; a.p.feedback = b.p.feedback = 0.5f; b.p.drift = 1.f; a.go (2.0, sine (330)); b.go (2.0, sine (330));
+        double d = 0; for (size_t i = 0; i < a.out.size(); ++i) d += std::abs (a.out[i] - b.out[i]); CHECK (d > 1.0);
+        Run c; c.p.mix = 1.f; c.p.feedback = 1.f; c.p.drive = 1.f; c.p.pitchL = 7.f; c.p.pitchR = -5.f; c.go (6.0, [] (long i) { return i < 4800 ? 0.9f : 0.f; });
+        CHECK (peakOf (c.out) <= 1.0f && peakOf (c.outR) <= 1.0f);
+        for (float sm : { 0.f, 1.f }) { Run r; r.p.mix = 1.f; r.p.feedback = 0.f; r.p.tone = 1.f; r.p.pitchL = r.p.pitchR = 12.f; r.p.smear = sm; r.p.time = 1; r.go (3.0, sine (440));
+            const double f = peakFreq (r.out, (size_t) (1.5 * kSr), (size_t) (2.5 * kSr)); CHECK (std::abs (f - 880.0) < (sm == 0.f ? 56.0 : 26.0)); }
+    }
     // hard use: spirals up with feedback at the top stay finite and bounded
     {
         Run r; uint32_t s = 99; auto u = [&] { s = s * 1664525u + 1013904223u; return (float) (s >> 8) / 16777216.f; }; float pk = 0.f;
         for (int i = 0; i < 300; ++i)
         {
-            r.p.time = (int) (u() * 6); r.p.pitchL = (u() - 0.5f) * 48.f; r.p.pitchR = (u() - 0.5f) * 48.f; r.p.feedback = u() < 0.4f ? 1.f : u(); r.p.tone = u(); r.p.mix = u(); r.p.hold = u() < 0.3f; r.bpm = 40.0 + 200.0 * u();
+            r.p.time = (int) (u() * 6); r.p.pitchL = (u() - 0.5f) * 48.f; r.p.pitchR = (u() - 0.5f) * 48.f; r.p.feedback = u() < 0.4f ? 1.f : u(); r.p.tone = u(); r.p.mix = u(); r.p.hold = u() < 0.3f; r.p.drive = u(); r.p.drift = u(); r.p.smear = u(); r.bpm = 40.0 + 200.0 * u();
             const size_t from = r.out.size(); r.go (0.1, [&] (long) { return 0.9f * (u() * 2.f - 1.f); });
             pk = std::max (pk, peakOf (r.out, from));
         }
