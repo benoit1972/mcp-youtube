@@ -152,6 +152,14 @@ int main()
         long first = 1L << 40; for (const auto& l : r.log) first = std::min (first, l.k);
         CHECK (std::fmod ((double) first * 0.25, 0.25) < 1e-9 && first * 0.25 >= 0.3);
     }
+    // ---- killAll lets go of every key, even latched ones ----
+    {
+        Run r (&kit); r.p.latch = true; r.p.density = 1.f; r.e.noteOn (60, 0.9f, r.p); r.e.noteOn (64, 0.9f, r.p); r.steps (20);
+        CHECK (r.e.activeNotes() == 2);
+        r.e.killAll(); r.steps (2); r.out.clear(); r.log.clear(); r.steps (40);
+        CHECK (r.e.activeNotes() == 0 && r.log.empty() && peakOf (r.out) == 0.f);
+        r.e.noteOn (67, 0.9f, r.p); r.steps (20); CHECK (! r.log.empty());
+    }
     // ---- tails, transport, hard use ----
     {
         Run r (&kit); r.p.density = 1.f; r.p.ring = 1.f; r.e.noteOn (60, 1.f, r.p); r.steps (20); r.e.noteOff (60); r.steps (4); r.go (12.0);

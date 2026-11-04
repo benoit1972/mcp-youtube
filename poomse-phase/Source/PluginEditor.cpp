@@ -168,7 +168,7 @@ PoomsePhaseEditor::PoomsePhaseEditor (PoomsePhaseProcessor& p) : AudioProcessorE
             resetButton.setButtonText ("Sure?");
             juce::Timer::callAfterDelay (3000, [safe = juce::Component::SafePointer<PoomsePhaseEditor> (this)] { if (safe != nullptr) safe->disarmReset(); });
         }
-        else { proc.resetToDefaults(); presetBox.setSelectedItemIndex (0, juce::dontSendNotification); disarmReset(); }
+        else { proc.resetToDefaults(); proc.clearNotes(); presetBox.setSelectedItemIndex (0, juce::dontSendNotification); disarmReset(); }
     };
 
     for (int i = 0; i < PoomsePhaseProcessor::getNumPresets(); ++i) presetBox.addItem (PoomsePhaseProcessor::getPresetName (i), i + 1);

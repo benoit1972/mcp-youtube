@@ -49,6 +49,7 @@ public:
     void reroll();
     int getSeed() const { return (int) apvts.getRawParameterValue ("seed")->load(); }
     void resetToDefaults();
+    void clearNotes() { clearRequest.store (true); }          // lets go of every key, held or latched, and silences what rings
     static int getNumPresets();
     static juce::String getPresetName (int i);
     void applyPreset (int index);
@@ -76,6 +77,7 @@ private:
     juce::SmoothedValue<float> levelS;
     double currentSampleRate = 48000.0, internalBeat = 0.0;
     std::atomic<int> currentPreset { 0 }, soundVersion { 0 };
+    std::atomic<bool> clearRequest { false };
 
     juce::SpinLock kitLock;
     std::shared_ptr<const ph::Kit> kit, audioKit;

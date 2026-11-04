@@ -204,6 +204,7 @@ void PoomsePhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
     }
     if (audioKit == nullptr) return;
+    if (clearRequest.exchange (false)) engine.killAll();
 
     double bpm = 120.0, hostBeat = -1.0;
     bool playing = true;
