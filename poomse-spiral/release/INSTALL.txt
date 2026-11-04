@@ -1,0 +1,6 @@
+1. Dézippez PoomseSpiral-AU-macOS.zip : vous obtenez "Poomse Spiral.component".
+2. Copiez-le dans /Library/Audio/Plug-Ins/Components/ (Finder > Aller > Aller au dossier...).
+3. Le plugin n'est pas signé par Apple : dans le Terminal, lancez
+   sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Poomse Spiral.component"
+4. Relancez Ableton Live (Réglages > Plug-ins > Rescanner avec Option) : c'est un INSTRUMENT,
+   dans Plug-ins > Audio Units > Benoit > Poomse Spiral (en effet audio, sur une piste audio).
