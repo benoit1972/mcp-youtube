@@ -1,6 +1,6 @@
 #include "PluginEditor.h"
 
-namespace { constexpr int kWidth = 780, kHeight = 620, kPad = 28; const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }; }
+namespace { constexpr int kWidth = 780, kHeight = 500, kPad = 28; }
 
 void WaveView::paint (juce::Graphics& g)
 {
@@ -27,16 +27,6 @@ void WaveView::paint (juce::Graphics& g)
     g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
     g.drawText ("ONE CYCLE OF THE OSCILLATOR", all.reduced (14.f, 6.f), juce::Justification::topLeft, false);
-}
-
-void KeyPad::paint (juce::Graphics& g)
-{
-    auto r = getLocalBounds().toFloat().reduced (3.f);
-    if (down) { g.setColour (look::accent); g.fillRoundedRectangle (r, 8.f); }
-    else { g.setColour (look::paper); g.fillRoundedRectangle (r, 8.f); g.setColour (look::rule); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.4f); }
-    g.setColour (down ? look::paper : look::ink);
-    g.setFont (look::caps (12.f, true, 0.1f));
-    g.drawText (label, r, juce::Justification::centred, false);
 }
 
 void PoomseWarpEditor::makeKnob (const juce::String& id, const juce::String& text, const juce::String& help)
@@ -73,14 +63,6 @@ PoomseWarpEditor::PoomseWarpEditor (PoomseWarpProcessor& p) : AudioProcessorEdit
     makeKnob ("level", "Level", "Output level.");
     for (int i = 0; i < knobs.size(); ++i) knobs[i]->slider.setName ("k" + juce::String (i));
 
-    for (int i = 0; i < 13; ++i)
-    {
-        auto* k = keys.add (new KeyPad (i == 12 ? "C" : kNoteNames[i]));
-        const int note = 60 + i;
-        k->onDown = [this, note] { proc.uiNote (note, true); };
-        k->onUp = [this, note] { proc.uiNote (note, false); };
-        addAndMakeVisible (k);
-    }
     randomButton.setComponentID ("ink");
     randomButton.onClick = [this] { proc.randomise(); };
     resetButton.setComponentID ("pill");
@@ -153,6 +135,4 @@ void PoomseWarpEditor::resized()
         knobs[i]->name.setBounds (cell.removeFromTop (16));
         knobs[i]->slider.setBounds (cell);
     }
-    const int kw = contentW / 13;
-    for (int i = 0; i < keys.size(); ++i) keys[i]->setBounds (kPad + i * kw, 482, kw, 70);
 }

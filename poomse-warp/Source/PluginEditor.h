@@ -13,18 +13,6 @@ private:
     PoomseWarpProcessor& proc;
 };
 
-class KeyPad : public juce::Component
-{
-public:
-    KeyPad (juce::String t) : label (std::move (t)) {}
-    void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override { down = true; if (onDown) onDown(); repaint(); }
-    void mouseUp (const juce::MouseEvent&) override { down = false; if (onUp) onUp(); repaint(); }
-    std::function<void()> onDown, onUp;
-private:
-    juce::String label; bool down = false;
-};
-
 class PoomseWarpEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
@@ -49,7 +37,6 @@ private:
     PoomseWarpProcessor& proc;
     WaveView view;
     juce::OwnedArray<Knob> knobs;
-    juce::OwnedArray<KeyPad> keys;
     juce::StringArray helps;
     juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, prevPreset { "<" }, nextPreset { ">" };
     juce::ComboBox presetBox;
