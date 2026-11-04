@@ -38,10 +38,10 @@ private:
     WaveView view;
     juce::OwnedArray<Knob> knobs;
     juce::StringArray helps;
-    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, prevPreset { "<" }, nextPreset { ">" };
+    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, rerollButton { "Reroll" }, prevPreset { "<" }, nextPreset { ">" };
     juce::ComboBox presetBox;
     juce::String helpText;
-    int hovered = -1;
+    int hovered = -1, shownSeed = -1;
     bool resetArmed = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseWarpEditor)

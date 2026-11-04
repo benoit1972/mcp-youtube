@@ -5,13 +5,14 @@ static int failures = 0;
 static const double kSr = 48000.0;
 struct Run
 {
-    sp::Engine e; sp::Params p; double bpm = 120.0; std::vector<float> in, out, outR;
+    sp::Engine e; sp::Params p; double bpm = 120.0, beat = 0.0; std::vector<float> in, out, outR;
     Run() { e.prepare (kSr); }
     template <class F> void go (double s, F gen)
     {
         const int n = (int) (s * kSr); std::vector<float> a ((size_t) n), l ((size_t) n), r ((size_t) n);
         for (int i = 0; i < n; ++i) a[(size_t) i] = gen ((long) in.size() + i);
-        e.process (n, p, bpm, a.data(), a.data(), l.data(), r.data());
+        e.process (n, p, beat, bpm, a.data(), a.data(), l.data(), r.data());
+        beat += (double) n / (kSr * 60.0 / bpm);
         in.insert (in.end(), a.begin(), a.end()); out.insert (out.end(), l.begin(), l.end()); outR.insert (outR.end(), r.begin(), r.end());
     }
 };
@@ -63,16 +64,30 @@ int main()
         for (float sm : { 0.f, 1.f }) { Run r; r.p.mix = 1.f; r.p.feedback = 0.f; r.p.tone = 1.f; r.p.pitchL = r.p.pitchR = 12.f; r.p.smear = sm; r.p.time = 1; r.go (3.0, sine (440));
             const double f = peakFreq (r.out, (size_t) (1.5 * kSr), (size_t) (2.5 * kSr)); CHECK (std::abs (f - 880.0) < (sm == 0.f ? 56.0 : 26.0)); }
     }
+    // Chaos: written, not random. Without it nothing happens; with it the same version always plays the same way
+    {
+        auto run = [&] (float chaos, int seed) { Run r; r.p.mix = 1.f; r.p.chaos = chaos; r.p.seed = seed; r.p.feedback = 0.6f; r.go (12.0, sine (330)); return r.out; };
+        const auto a = run (0.f, 1), b = run (1.f, 1), c = run (1.f, 1), d = run (1.f, 2);
+        CHECK (a != b); CHECK (b == c); CHECK (b != d); CHECK (a == run (0.f, 2));
+    }
+    // Rise: the echoes climb
+    {
+        Run r; r.p.mix = 1.f; r.p.feedback = 0.9f; r.p.pitchL = r.p.pitchR = 0.f; r.p.time = 1; r.p.tone = 1.f;
+        r.go (1.0, sine (330)); r.p.rise = true; r.go (4.0, sine (330));
+        const double f0 = peakFreq (r.out, (size_t) (0.3 * kSr), (size_t) (0.9 * kSr)), f1 = peakFreq (r.out, (size_t) (4.0 * kSr), (size_t) (5.0 * kSr));
+        std::printf ("rise: %.0f Hz -> %.0f Hz\n", f0, f1); CHECK (f1 > f0 * 1.5);
+        r.p.rise = false; r.p.feedback = 0.f; r.go (8.0, [] (long) { return 0.f; }); CHECK (peakOf (r.out, r.out.size() - 4800) < 0.02f);
+    }
     // hard use: spirals up with feedback at the top stay finite and bounded
     {
         Run r; uint32_t s = 99; auto u = [&] { s = s * 1664525u + 1013904223u; return (float) (s >> 8) / 16777216.f; }; float pk = 0.f;
         for (int i = 0; i < 300; ++i)
         {
-            r.p.time = (int) (u() * 6); r.p.pitchL = (u() - 0.5f) * 48.f; r.p.pitchR = (u() - 0.5f) * 48.f; r.p.feedback = u() < 0.4f ? 1.f : u(); r.p.tone = u(); r.p.mix = u(); r.p.hold = u() < 0.3f; r.p.drive = u(); r.p.drift = u(); r.p.smear = u(); r.bpm = 40.0 + 200.0 * u();
+            r.p.time = (int) (u() * 6); r.p.pitchL = (u() - 0.5f) * 48.f; r.p.pitchR = (u() - 0.5f) * 48.f; r.p.feedback = u() < 0.4f ? 1.f : u(); r.p.tone = u(); r.p.mix = u(); r.p.hold = u() < 0.3f; r.p.drive = u(); r.p.drift = u(); r.p.smear = u(); r.p.chaos = u(); r.p.rise = u() < 0.2f; r.p.seed = 1 + (int) (u() * 50); r.bpm = 40.0 + 200.0 * u();
             const size_t from = r.out.size(); r.go (0.1, [&] (long) { return 0.9f * (u() * 2.f - 1.f); });
             pk = std::max (pk, peakOf (r.out, from));
         }
-        std::printf ("300 random changes: peak %.2f\n", pk); CHECK (pk < 2.1f);
+        std::printf ("300 random changes: peak %.2f\n", pk); CHECK (pk < 2.2f);
     }
     std::printf (failures ? "%d FAILURES\n" : "ALL TESTS PASSED\n", failures);
     return failures ? 1 : 0;

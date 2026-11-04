@@ -32,6 +32,8 @@ public:
     void setStateInformation (const void*, int) override;
 
     void randomise();
+    void reroll();
+    int getSeed() const { return (int) apvts.getRawParameterValue ("seed")->load(); }
     void resetToDefaults();
     static int getNumPresets();
     static juce::String getPresetName (int i);

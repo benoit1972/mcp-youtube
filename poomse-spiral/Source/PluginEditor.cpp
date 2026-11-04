@@ -1,6 +1,6 @@
 #include "PluginEditor.h"
 
-namespace { constexpr int kWidth = 780, kHeight = 590, kPad = 28; constexpr float kInset = 12.f; }
+namespace { constexpr int kWidth = 780, kHeight = 580, kPad = 28; constexpr float kInset = 12.f; }
 
 void EchoView::paint (juce::Graphics& g)
 {
@@ -53,12 +53,16 @@ PoomseSpiralEditor::PoomseSpiralEditor (PoomseSpiralProcessor& p) : AudioProcess
     makeKnob ("drive", "Drive", "Warm saturation inside the loop: each pass gets a little dirtier.");
     makeKnob ("drift", "Drift", "A slow tape-like wobble of the delay time, different on each side.");
     makeKnob ("smear", "Smear", "Small: grainy, robotic echoes. Large: soft, diffuse, almost a reverb.");
+    makeKnob ("chaos", "Chaos", "How often something violent happens on the beat: huge pitch leaps, backwards echoes, tape speed-ups, sudden freezes. Reroll writes a different story.");
     makeKnob ("mix", "Mix", "Dry sound on the left, echoes on the right.");
     makeKnob ("level", "Level", "Output level.");
 
     holdButton.setComponentID ("toggle"); holdButton.setClickingTogglesState (true);
     holdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "hold", holdButton);
-    addAndMakeVisible (holdButton);
+    riseButton.setComponentID ("toggle"); riseButton.setClickingTogglesState (true);
+    riseAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "rise", riseButton);
+    rerollButton.setComponentID ("pill"); rerollButton.onClick = [this] { proc.reroll(); };
+    addAndMakeVisible (holdButton); addAndMakeVisible (riseButton); addAndMakeVisible (rerollButton);
 
     randomButton.setComponentID ("ink");
     randomButton.onClick = [this] { proc.randomise(); };
@@ -90,6 +94,7 @@ PoomseSpiralEditor::~PoomseSpiralEditor() { stopTimer(); setLookAndFeel (nullptr
 
 void PoomseSpiralEditor::timerCallback()
 {
+    if (proc.getSeed() != shownSeed) { shownSeed = proc.getSeed(); repaint(); }
     int h = -1;
     for (int i = 0; i < knobs.size(); ++i) if (knobs[i]->slider.isMouseOverOrDragging()) h = i;
     if (h != hovered) { hovered = h; repaint(); }
@@ -113,9 +118,12 @@ void PoomseSpiralEditor::paint (juce::Graphics& g)
     g.drawText ("POOMSE", kPad, 16, w1 + 4, 30, juce::Justification::centredLeft, false);
     g.setColour (look::accent);
     g.drawText ("SPIRAL", kPad + w1 - 4, 16, 160, 30, juce::Justification::centredLeft, false);
+    g.setFont (look::caps (9.5f, true, 0.14f));
+    g.setColour (look::dim);
+    g.drawText ("VERSION " + juce::String (shownSeed), rerollButton.getX(), 52, rerollButton.getWidth(), 12, juce::Justification::centred, false);
     g.setColour (look::ink);
     g.setFont (juce::Font (juce::FontOptions (12.5f)));
-    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Set a Pitch: every echo is higher or lower than the one before. Hold keeps them turning."),
+    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Set a Pitch: every echo climbs or falls. Rise pushes them up while it is on. Chaos writes violent surprises on the beat."),
                 kPad, getHeight() - 34, getWidth() - 2 * kPad, 20, juce::Justification::centredLeft, false);
 }
 
@@ -126,14 +134,16 @@ void PoomseSpiralEditor::resized()
     prevPreset.setBounds (kPad, 62, 26, 28);
     presetBox.setBounds (kPad + 32, 62, 250, 28);
     nextPreset.setBounds (kPad + 288, 62, 26, 28);
-    holdButton.setBounds (getWidth() - kPad - 100, 64, 100, 26);
+    holdButton.setBounds (getWidth() - kPad - 80, 64, 80, 26);
+    riseButton.setBounds (holdButton.getX() - 8 - 80, 64, 80, 26);
+    rerollButton.setBounds (riseButton.getX() - 8 - 90, 64, 90, 26);
 
     const int contentW = getWidth() - 2 * kPad;
     view.setBounds (kPad, 104, contentW, 220);
-    const int cw = contentW / 5;
+    const int cw = contentW / 6;
     for (int i = 0; i < knobs.size(); ++i)
     {
-        juce::Rectangle<int> cell (kPad + (i % 5) * cw, 330 + (i / 5) * 110, cw, 110);
+        juce::Rectangle<int> cell (kPad + (i % 6) * cw, 330 + (i / 6) * 110, cw, 110);
         knobs[i]->name.setBounds (cell.removeFromTop (16));
         knobs[i]->slider.setBounds (cell);
     }

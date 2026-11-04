@@ -40,12 +40,13 @@ private:
     EchoView view;
     juce::OwnedArray<Knob> knobs;
     juce::StringArray helps;
-    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" };
+    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, holdButton { "Hold" }, riseButton { "Rise" }, rerollButton { "Reroll" };
     juce::TextButton prevPreset { "<" }, nextPreset { ">" };
     juce::ComboBox presetBox;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttachment, riseAttachment;
     juce::String helpText;
     int hovered = -1;
+    int shownSeed = -1;
     bool resetArmed = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseSpiralEditor)

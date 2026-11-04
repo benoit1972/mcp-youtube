@@ -34,6 +34,8 @@ public:
 
     void uiNote (int note, bool on);
     void randomise();
+    void reroll();
+    int getSeed() const { return (int) apvts.getRawParameterValue ("seed")->load(); }
     void resetToDefaults();
     static int getNumPresets();
     static juce::String getPresetName (int i);

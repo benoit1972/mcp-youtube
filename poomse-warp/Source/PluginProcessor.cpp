@@ -4,8 +4,8 @@
 namespace
 {
 using Range = juce::NormalisableRange<float>;
-enum { pWarp, pTwist, pRatio, pPluck, pCutoff, pReso, pDetune, pAttack, pDecay, pSustain, pRelease, pSpace, pLevel, numRaw };
-const char* const kIds[numRaw] = { "warp", "twist", "ratio", "pluck", "cutoff", "reso", "detune", "attack", "decay", "sustain", "release", "space", "level" };
+enum { pWarp, pTwist, pRatio, pFold, pSync, pEvolve, pSeed, pPluck, pCutoff, pReso, pDetune, pAttack, pDecay, pSustain, pRelease, pSpace, pLevel, numRaw };
+const char* const kIds[numRaw] = { "warp", "twist", "ratio", "fold", "sync", "evolve", "seed", "pluck", "cutoff", "reso", "detune", "attack", "decay", "sustain", "release", "space", "level" };
 
 struct PresetParam { const char* id; float value; };
 struct Preset { const char* name; std::vector<PresetParam> params; };
@@ -13,11 +13,11 @@ const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
         { "Init", {} },
-        { "Glass Pluck",  { { "warp", 0.55f }, { "twist", 0.35f }, { "ratio", 3 }, { "pluck", 0.8f }, { "decay", 0.3f }, { "sustain", 0.f }, { "release", 0.4f }, { "space", 0.35f } } },
-        { "Soft Pad",     { { "warp", 0.2f }, { "attack", 0.6f }, { "sustain", 0.8f }, { "release", 0.7f }, { "detune", 0.6f }, { "cutoff", 0.6f }, { "space", 0.5f } } },
-        { "Metal Bell",   { { "warp", 0.1f }, { "twist", 0.65f }, { "ratio", 5 }, { "pluck", 0.5f }, { "decay", 0.6f }, { "sustain", 0.f }, { "release", 0.6f }, { "space", 0.45f } } },
-        { "Acid Bite",    { { "warp", 0.8f }, { "pluck", 0.9f }, { "cutoff", 0.35f }, { "reso", 0.7f }, { "decay", 0.25f }, { "sustain", 0.2f }, { "release", 0.15f }, { "detune", 0.f }, { "space", 0.1f } } },
-        { "Deep Sub",     { { "warp", 0.05f }, { "ratio", 0 }, { "cutoff", 0.45f }, { "pluck", 0.2f }, { "detune", 0.1f }, { "space", 0.05f } } },
+        { "Zap Lead",     { { "warp", 0.4f }, { "twist", 0.2f }, { "sync", 0.55f }, { "pluck", 0.9f }, { "decay", 0.35f }, { "sustain", 0.5f }, { "cutoff", 0.9f }, { "detune", 0.35f }, { "space", 0.3f } } },
+        { "Broken Bell",  { { "warp", 0.1f }, { "twist", 0.7f }, { "ratio", 5 }, { "fold", 0.45f }, { "pluck", 0.7f }, { "decay", 0.55f }, { "sustain", 0.f }, { "release", 0.6f }, { "evolve", 0.7f }, { "space", 0.5f } } },
+        { "Screaming Pad",{ { "warp", 0.7f }, { "fold", 0.5f }, { "sync", 0.3f }, { "attack", 0.55f }, { "sustain", 0.85f }, { "release", 0.7f }, { "detune", 0.8f }, { "evolve", 0.8f }, { "cutoff", 0.7f }, { "space", 0.55f } } },
+        { "Acid Fold",    { { "warp", 0.8f }, { "fold", 0.7f }, { "pluck", 1.f }, { "cutoff", 0.3f }, { "reso", 0.75f }, { "decay", 0.2f }, { "sustain", 0.15f }, { "release", 0.12f }, { "detune", 0.f }, { "evolve", 0.2f }, { "space", 0.1f } } },
+        { "Sub Rumble",   { { "warp", 0.05f }, { "ratio", 0 }, { "fold", 0.3f }, { "cutoff", 0.4f }, { "pluck", 0.2f }, { "evolve", 0.2f }, { "space", 0.05f } } },
     };
     return list;
 }
@@ -32,9 +32,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseWarpProcessor::createL
     auto pct = [] (float x, int) { return juce::String (juce::roundToInt (x * 100.f)) + " %"; };
     auto f01 = [&] (const char* n, const char* label, float def) { l.add (std::make_unique<F> (id (n), label, Range (0.f, 1.f, 0.001f), def, attr (pct))); };
 
-    f01 ("warp", "Warp", 0.35f); f01 ("twist", "Twist", 0.f);
+    f01 ("warp", "Warp", 0.5f); f01 ("twist", "Twist", 0.25f);
     l.add (std::make_unique<juce::AudioParameterChoice> (id ("ratio"), "Ratio", juce::StringArray { "0.5", "1", "2", "3", "4", "5", "7" }, 1));
-    f01 ("pluck", "Pluck", 0.4f);
+    f01 ("fold", "Fold", 0.15f); f01 ("sync", "Sync", 0.f); f01 ("evolve", "Evolve", 0.35f);
+    l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version", 1, 999, 1));
+    f01 ("pluck", "Pluck", 0.5f);
     l.add (std::make_unique<F> (id ("cutoff"), "Cutoff", Range (0.f, 1.f, 0.001f), 0.8f, attr ([] (float x, int) { return juce::String (juce::roundToInt (40.f * std::pow (450.f, x))) + " Hz"; })));
     f01 ("reso", "Reso", 0.15f); f01 ("detune", "Detune", 0.2f);
     l.add (std::make_unique<F> (id ("attack"), "Attack", Range (0.f, 1.f, 0.001f), 0.05f, attr ([] (float x, int) { return juce::String (juce::roundToInt (1000.f * 0.001f * std::pow (2000.f, x))) + " ms"; })));
@@ -59,7 +61,7 @@ juce::String PoomseWarpProcessor::getPresetName (int i) { return presets()[(size
 wp::Params PoomseWarpProcessor::readParams() const
 {
     wp::Params p;
-    p.warp = raw[pWarp]->load(); p.twist = raw[pTwist]->load(); p.ratio = (int) raw[pRatio]->load(); p.pluck = raw[pPluck]->load();
+    p.warp = raw[pWarp]->load(); p.twist = raw[pTwist]->load(); p.fold = raw[pFold]->load(); p.sync = raw[pSync]->load(); p.evolve = raw[pEvolve]->load(); p.seed = (int) raw[pSeed]->load(); p.ratio = (int) raw[pRatio]->load(); p.pluck = raw[pPluck]->load();
     p.cutoff = raw[pCutoff]->load(); p.reso = raw[pReso]->load(); p.detune = raw[pDetune]->load(); p.attack = raw[pAttack]->load();
     p.decay = raw[pDecay]->load(); p.sustain = raw[pSustain]->load(); p.release = raw[pRelease]->load();
     return p;
@@ -90,6 +92,7 @@ void PoomseWarpProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (auto* head = getPlayHead()) if (auto pos = head->getPosition()) if (auto b = pos->getBpm()) bpm = *b;
     const int n = buffer.getNumSamples();
     const wp::Params p = readParams();
+    engine.setSeed (p.seed);
     float* L = buffer.getWritePointer (0);
     float* R = buffer.getWritePointer (1);
     int pos = 0;
@@ -133,9 +136,20 @@ void PoomseWarpProcessor::randomise()
     juce::Random rng;
     auto set = [this] (const char* id, float v) { if (auto* q = apvts.getParameter (id)) { q->beginChangeGesture(); q->setValueNotifyingHost (q->convertTo0to1 (v)); q->endChangeGesture(); } };
     set ("warp", rng.nextFloat()); set ("twist", rng.nextFloat() < 0.5f ? 0.f : rng.nextFloat() * 0.8f); set ("ratio", (float) rng.nextInt (7));
+    set ("fold", rng.nextFloat() * 0.8f); set ("sync", rng.nextFloat() < 0.5f ? 0.f : rng.nextFloat()); set ("evolve", rng.nextFloat()); reroll();
     set ("pluck", rng.nextFloat()); set ("cutoff", 0.4f + 0.6f * rng.nextFloat()); set ("reso", 0.6f * rng.nextFloat());
     set ("decay", rng.nextFloat()); set ("sustain", rng.nextFloat()); set ("release", 0.7f * rng.nextFloat());
     set ("detune", 0.7f * rng.nextFloat()); set ("space", 0.7f * rng.nextFloat());
+}
+
+void PoomseWarpProcessor::reroll()
+{
+    if (auto* q = apvts.getParameter ("seed"))
+    {
+        q->beginChangeGesture();
+        q->setValueNotifyingHost (q->convertTo0to1 ((float) (1 + juce::Random::getSystemRandom().nextInt (999))));
+        q->endChangeGesture();
+    }
 }
 
 void PoomseWarpProcessor::resetToDefaults()

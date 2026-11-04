@@ -51,6 +51,9 @@ PoomseWarpEditor::PoomseWarpEditor (PoomseWarpProcessor& p) : AudioProcessorEdit
     makeKnob ("warp", "Warp", "Bends the sine: round on the left, sharp and bright on the right.");
     makeKnob ("twist", "Twist", "A second sine twists the first: metallic, bell-like sounds.");
     makeKnob ("ratio", "Ratio", "The pitch of that second sine, compared to the note. Whole numbers ring; 0.5 is deep.");
+    makeKnob ("fold", "Fold", "The wave folds back on itself: from smooth to harsh and metallic.");
+    makeKnob ("sync", "Sync", "Hard sync: the tone screams and sweeps. With Pluck, every note zaps.");
+    makeKnob ("evolve", "Evolve", "Every note gets a slightly different timbre, and it breathes while it is held. Reroll writes another story.");
     makeKnob ("pluck", "Pluck", "How much Warp and the filter snap shut over the first moments of each note.");
     makeKnob ("cutoff", "Cutoff", "The filter: closed on the left, open on the right.");
     makeKnob ("reso", "Reso", "Emphasis at the cutoff.");
@@ -63,6 +66,7 @@ PoomseWarpEditor::PoomseWarpEditor (PoomseWarpProcessor& p) : AudioProcessorEdit
     makeKnob ("level", "Level", "Output level.");
     for (int i = 0; i < knobs.size(); ++i) knobs[i]->slider.setName ("k" + juce::String (i));
 
+    rerollButton.setComponentID ("pill"); rerollButton.onClick = [this] { proc.reroll(); }; addAndMakeVisible (rerollButton);
     randomButton.setComponentID ("ink");
     randomButton.onClick = [this] { proc.randomise(); };
     resetButton.setComponentID ("pill");
@@ -91,6 +95,7 @@ PoomseWarpEditor::~PoomseWarpEditor() { stopTimer(); setLookAndFeel (nullptr); }
 
 void PoomseWarpEditor::timerCallback()
 {
+    if (proc.getSeed() != shownSeed) { shownSeed = proc.getSeed(); repaint(); }
     int h = -1;
     for (int i = 0; i < knobs.size(); ++i) if (knobs[i]->slider.isMouseOverOrDragging()) h = i;
     if (h != hovered) { hovered = h; repaint(); }
@@ -113,9 +118,12 @@ void PoomseWarpEditor::paint (juce::Graphics& g)
     g.drawText ("POOMSE", kPad, 16, w1 + 4, 30, juce::Justification::centredLeft, false);
     g.setColour (look::accent);
     g.drawText ("WARP", kPad + w1 - 4, 16, 160, 30, juce::Justification::centredLeft, false);
+    g.setFont (look::caps (9.5f, true, 0.14f));
+    g.setColour (look::dim);
+    g.drawText ("VERSION " + juce::String (shownSeed), rerollButton.getX() - 4, 50, rerollButton.getWidth() + 8, 12, juce::Justification::centred, false);
     g.setColour (look::ink);
     g.setFont (juce::Font (juce::FontOptions (12.5f)));
-    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Turn Warp and Twist first: that is where the sound is. Pluck makes it snap."),
+    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Warp, Twist, Fold and Sync are the sound. Pluck makes every note snap, Evolve makes each one different."),
                 kPad, getHeight() - 34, getWidth() - 2 * kPad, 20, juce::Justification::centredLeft, false);
 }
 
@@ -123,12 +131,13 @@ void PoomseWarpEditor::resized()
 {
     randomButton.setBounds (getWidth() - kPad - 104, 18, 104, 30);
     resetButton.setBounds (randomButton.getX() - 10 - 80, 18, 80, 30);
+    rerollButton.setBounds (resetButton.getX() - 10 - 90, 18, 90, 30);
     prevPreset.setBounds (kPad, 62, 26, 28);
     presetBox.setBounds (kPad + 32, 62, 250, 28);
     nextPreset.setBounds (kPad + 288, 62, 26, 28);
     const int contentW = getWidth() - 2 * kPad;
     view.setBounds (kPad, 100, contentW, 150);
-    const int cols = 7, cw = contentW / cols;
+    const int cols = 8, cw = contentW / cols;
     for (int i = 0; i < knobs.size(); ++i)
     {
         juce::Rectangle<int> cell (kPad + (i % cols) * cw, 264 + (i / cols) * 104, cw, 104);

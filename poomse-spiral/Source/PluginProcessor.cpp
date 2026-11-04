@@ -4,8 +4,8 @@
 namespace
 {
 using Range = juce::NormalisableRange<float>;
-enum { pTime, pPitchL, pPitchR, pFeedback, pTone, pDrive, pDrift, pSmear, pMix, pLevel, pHold, numRaw };
-const char* const kIds[numRaw] = { "time", "pitchL", "pitchR", "feedback", "tone", "drive", "drift", "smear", "mix", "level", "hold" };
+enum { pTime, pPitchL, pPitchR, pFeedback, pTone, pDrive, pDrift, pSmear, pChaos, pMix, pLevel, pHold, pRise, pSeed, numRaw };
+const char* const kIds[numRaw] = { "time", "pitchL", "pitchR", "feedback", "tone", "drive", "drift", "smear", "chaos", "mix", "level", "hold", "rise", "seed" };
 
 struct PresetParam { const char* id; float value; };
 struct Preset { const char* name; std::vector<PresetParam> params; };
@@ -13,11 +13,11 @@ const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list = {
         { "Init", {} },
-        { "Rising Spiral", { { "time", 2 }, { "pitchL", 7.f }, { "pitchR", 7.f }, { "feedback", 0.7f }, { "drift", 0.2f } } },
-        { "Falling Away",  { { "time", 3 }, { "pitchL", -12.f }, { "pitchR", -12.f }, { "feedback", 0.65f }, { "tone", 0.4f }, { "drive", 0.5f } } },
-        { "Octave Shimmer",{ { "time", 1 }, { "pitchL", 12.f }, { "pitchR", 12.f }, { "feedback", 0.6f }, { "mix", 0.4f }, { "smear", 0.8f }, { "drive", 0.1f } } },
-        { "Robot Echo",    { { "time", 0 }, { "pitchL", 3.f }, { "pitchR", -3.f }, { "feedback", 0.7f }, { "smear", 0.f }, { "drive", 0.6f }, { "drift", 0.f } } },
-        { "Tape Wash",     { { "time", 5 }, { "pitchL", 2.f }, { "pitchR", -2.f }, { "feedback", 0.85f }, { "tone", 0.35f }, { "mix", 0.6f }, { "smear", 1.f }, { "drift", 0.8f }, { "drive", 0.4f } } },
+        { "Rising Spiral", { { "time", 2 }, { "pitchL", 7.f }, { "pitchR", 7.f }, { "feedback", 0.75f }, { "drift", 0.2f }, { "chaos", 0.f } } },
+        { "Runaway",       { { "time", 1 }, { "pitchL", 12.f }, { "pitchR", 7.f }, { "feedback", 0.97f }, { "drive", 0.7f }, { "chaos", 0.5f }, { "mix", 0.6f } } },
+        { "Glitch Storm",  { { "time", 0 }, { "pitchL", 5.f }, { "pitchR", -7.f }, { "feedback", 0.7f }, { "smear", 0.f }, { "drive", 0.6f }, { "chaos", 1.f }, { "drift", 0.f } } },
+        { "Tape Collapse", { { "time", 3 }, { "pitchL", -12.f }, { "pitchR", -5.f }, { "feedback", 0.8f }, { "tone", 0.35f }, { "drive", 0.5f }, { "drift", 0.9f }, { "chaos", 0.6f } } },
+        { "Cathedral",     { { "time", 5 }, { "pitchL", 12.f }, { "pitchR", 7.f }, { "feedback", 0.85f }, { "tone", 0.4f }, { "mix", 0.65f }, { "smear", 1.f }, { "chaos", 0.2f } } },
     };
     return list;
 }
@@ -40,9 +40,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseSpiralProcessor::creat
     l.add (std::make_unique<F> (id ("drive"), "Drive", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
     l.add (std::make_unique<F> (id ("drift"), "Drift", Range (0.f, 1.f, 0.001f), 0.35f, attr (pct)));
     l.add (std::make_unique<F> (id ("smear"), "Smear", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<F> (id ("chaos"), "Chaos", Range (0.f, 1.f, 0.001f), 0.35f, attr (pct)));
     l.add (std::make_unique<F> (id ("mix"), "Mix", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
     l.add (std::make_unique<F> (id ("level"), "Level", Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
     l.add (std::make_unique<juce::AudioParameterBool> (id ("hold"), "Hold", false));
+    l.add (std::make_unique<juce::AudioParameterBool> (id ("rise"), "Rise", false));
+    l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version", 1, 999, 1));
     return l;
 }
 
@@ -60,7 +63,7 @@ sp::Params PoomseSpiralProcessor::readParams() const
 {
     sp::Params p;
     p.time = (int) raw[pTime]->load(); p.pitchL = raw[pPitchL]->load(); p.pitchR = raw[pPitchR]->load(); p.feedback = raw[pFeedback]->load();
-    p.tone = raw[pTone]->load(); p.drive = raw[pDrive]->load(); p.drift = raw[pDrift]->load(); p.smear = raw[pSmear]->load(); p.mix = raw[pMix]->load(); p.hold = raw[pHold]->load() > 0.5f;
+    p.tone = raw[pTone]->load(); p.drive = raw[pDrive]->load(); p.drift = raw[pDrift]->load(); p.smear = raw[pSmear]->load(); p.chaos = raw[pChaos]->load(); p.rise = raw[pRise]->load() > 0.5f; p.seed = (int) raw[pSeed]->load(); p.mix = raw[pMix]->load(); p.hold = raw[pHold]->load() > 0.5f;
     return p;
 }
 
@@ -84,9 +87,17 @@ void PoomseSpiralProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     std::copy (buffer.getReadPointer (1), buffer.getReadPointer (1) + n, inR.begin());
 
     if (clearRequest.exchange (false)) engine.clear();
-    double bpm = 120.0;
-    if (auto* head = getPlayHead()) if (auto pos = head->getPosition()) if (auto b = pos->getBpm()) bpm = *b;
-    engine.process (n, readParams(), bpm, inL.data(), inR.data(), buffer.getWritePointer (0), buffer.getWritePointer (1));
+    double bpm = 120.0, hostBeat = -1.0;
+    if (auto* head = getPlayHead())
+        if (auto pos = head->getPosition())
+        {
+            if (auto b = pos->getBpm()) bpm = *b;
+            if (auto ppq = pos->getPpqPosition()) hostBeat = *ppq;
+            if (! pos->getIsPlaying()) hostBeat = -1.0;
+        }
+    const double beatStart = hostBeat >= 0.0 ? hostBeat : internalBeat;
+    internalBeat = beatStart + (double) n * std::max (20.0, bpm) / (60.0 * currentSampleRate);
+    engine.process (n, readParams(), beatStart, bpm, inL.data(), inR.data(), buffer.getWritePointer (0), buffer.getWritePointer (1));
 
     levelS.setTargetValue (juce::Decibels::decibelsToGain (raw[pLevel]->load()));
     float* L = buffer.getWritePointer (0);
@@ -101,7 +112,17 @@ void PoomseSpiralProcessor::randomise()
     static const float steps[] = { -12.f, -7.f, -5.f, -2.f, 0.f, 2.f, 5.f, 7.f, 12.f };
     set ("time", (float) rng.nextInt (6)); set ("pitchL", steps[rng.nextInt (9)]); set ("pitchR", steps[rng.nextInt (9)]);
     set ("feedback", 0.3f + 0.55f * rng.nextFloat()); set ("tone", 0.3f + 0.6f * rng.nextFloat());
-    set ("drive", rng.nextFloat()); set ("drift", rng.nextFloat()); set ("smear", rng.nextFloat()); set ("mix", 0.3f + 0.5f * rng.nextFloat());
+    set ("chaos", 0.3f + 0.7f * rng.nextFloat()); reroll(); set ("drive", rng.nextFloat()); set ("drift", rng.nextFloat()); set ("smear", rng.nextFloat()); set ("mix", 0.3f + 0.5f * rng.nextFloat());
+}
+
+void PoomseSpiralProcessor::reroll()
+{
+    if (auto* q = apvts.getParameter ("seed"))
+    {
+        q->beginChangeGesture();
+        q->setValueNotifyingHost (q->convertTo0to1 ((float) (1 + juce::Random::getSystemRandom().nextInt (999))));
+        q->endChangeGesture();
+    }
 }
 
 void PoomseSpiralProcessor::resetToDefaults()
