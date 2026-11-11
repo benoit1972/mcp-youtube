@@ -1,0 +1,71 @@
+name: Build Poomse Murmur (Audio Unit)
+
+on:
+  push:
+    branches: [claude/plugin-format-au-s4g5da]
+    paths: ['poomse-murmur/**', '!poomse-murmur/release/**', '.github/workflows/build-murmur.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: poomse-murmur
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      - name: DSP tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Validate Audio Unit (auval)
+        continue-on-error: true
+        run: |
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Mmr1 Benp
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          COMP="$(find build -name 'Poomse Murmur.component' -maxdepth 6 | head -1)"
+          echo "component: $COMP"
+          ditto -c -k --keepParent "$COMP" "dist/PoomseMurmur-AU-macOS.zip"
+          cat > dist/INSTALL.txt <<'TXT'
+          1. Dézippez PoomseMurmur-AU-macOS.zip : vous obtenez "Poomse Murmur.component".
+          2. Copiez-le dans /Library/Audio/Plug-Ins/Components/ (Finder > Aller > Aller au dossier...).
+          3. Le plugin n'est pas signé par Apple : dans le Terminal, lancez
+             sudo xattr -dr com.apple.quarantine "/Library/Audio/Plug-Ins/Components/Poomse Murmur.component"
+          4. Relancez Ableton Live (Réglages > Plug-ins > Rescanner avec Option) : c'est un INSTRUMENT,
+             dans Plug-ins > Audio Units > Benoit > Poomse Murmur (piste MIDI).
+          TXT
+
+      - name: Publish the zip into the repository (poomse-murmur/release)
+        working-directory: ${{ github.workspace }}
+        run: |
+          git rm -rq --ignore-unmatch poomse-murmur/release
+          mkdir -p poomse-murmur/release
+          cp poomse-murmur/dist/PoomseMurmur-AU-macOS.zip poomse-murmur/dist/INSTALL.txt poomse-murmur/release/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add poomse-murmur/release
+          git commit -m "Publish built Poomse Murmur zip" || exit 0
+          for i in 1 2 3 4; do
+            git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break
+            sleep $((i * 5))
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PoomseMurmur-AU-macOS
+          path: poomse-murmur/dist/*
