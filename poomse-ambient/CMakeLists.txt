@@ -25,7 +25,7 @@ else()
   set(PA_FORMATS Standalone)
 endif()
 
-# An INSTRUMENT (aumu): four sounds made from scratch (a piano note, a bowed note, an open chord, a forest), played by the keys.
+# An INSTRUMENT (aumu): hold one note in a clip and it composes a piece (a progression, a piano motif, bass, violin, pad, a place) with four sounds.
 juce_add_plugin(PoomseAmbient
   COMPANY_NAME "Benoit"
   PLUGIN_MANUFACTURER_CODE Benp
@@ -42,8 +42,8 @@ target_sources(PoomseAmbient PRIVATE
   Source/PluginProcessor.cpp Source/PluginProcessor.h
   Source/PluginEditor.cpp Source/PluginEditor.h
   Source/Look.h
-  Source/Dsp/Rng.h Source/Dsp/Samples.h Source/Dsp/Sampler.h Source/Dsp/Fx.h Source/Dsp/PitchDetect.h
-  Source/Dsp/Reverb.h Source/Dsp/Aiff.h)
+  Source/Dsp/Rng.h Source/Dsp/Samples.h Source/Dsp/Compose.h Source/Dsp/Orchestra.h Source/Dsp/Fx.h
+  Source/Dsp/PitchDetect.h Source/Dsp/Reverb.h Source/Dsp/Aiff.h)
 
 target_compile_definitions(PoomseAmbient PUBLIC
   JUCE_WEB_BROWSER=0

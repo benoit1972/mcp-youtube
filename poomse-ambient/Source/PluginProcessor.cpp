@@ -4,8 +4,8 @@
 namespace
 {
 using Range = juce::NormalisableRange<float>;
-enum { pSound, pTone, pBloom, pTail, pLoops, pChord, pSpace, pLevel, pLatch, numRaw };
-const char* const kIds[numRaw] = { "sound", "tone", "bloom", "tail", "loops", "chord", "space", "level", "latch" };
+enum { pShort, pLong, pPad, pField, pMode, pJourney, pSilence, pDepth, pSurprise, pBars, pSeed, pReverb, pLevel, numRaw };
+const char* const kIds[numRaw] = { "short", "long", "pad", "field", "mode", "journey", "silence", "depth", "surprise", "bars", "seed", "reverb", "level" };
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::createLayout()
@@ -16,118 +16,75 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::crea
     auto attr = [] (auto fn) { return juce::AudioParameterFloatAttributes().withStringFromValueFunction (fn); };
     auto pct = [] (float x, int) { return juce::String (juce::roundToInt (x * 100.f)) + " %"; };
 
-    l.add (std::make_unique<juce::AudioParameterChoice> (id ("sound"), "Sound", juce::StringArray { "Piano", "Violin", "Pad", "Forest" }, 0));
-    l.add (std::make_unique<F> (id ("tone"),  "Tone",  Range (0.f, 1.f, 0.001f), 0.85f, attr (pct)));
-    l.add (std::make_unique<F> (id ("bloom"), "Bloom", Range (0.f, 1.f, 0.001f), 0.f, attr ([] (float x, int) { return x < 0.02f ? juce::String ("at once") : juce::String (x * x * 3.f, 1) + " s"; })));
-    l.add (std::make_unique<F> (id ("tail"),  "Tail",  Range (0.f, 1.f, 0.001f), 0.5f, attr ([] (float x, int) { return juce::String (0.08f * std::pow (75.f, x), 1) + " s"; })));
-    l.add (std::make_unique<F> (id ("loops"), "Loops", Range (0.f, 1.f, 0.001f), 0.25f, attr (pct)));
-    l.add (std::make_unique<juce::AudioParameterChoice> (id ("chord"), "Chord", juce::StringArray { "Off", "Octave", "Fifth", "Major", "Minor", "Sus" }, 0));
-    l.add (std::make_unique<F> (id ("space"), "Space", Range (0.f, 1.f, 0.001f), 0.4f, attr (pct)));
-    l.add (std::make_unique<F> (id ("level"), "Level", Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
-    l.add (std::make_unique<juce::AudioParameterBool> (id ("latch"), "Latch", false));
+    l.add (std::make_unique<F> (id ("short"), "Short", Range (0.f, 1.f, 0.001f), 0.8f, attr (pct)));
+    l.add (std::make_unique<F> (id ("long"),  "Long",  Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
+    l.add (std::make_unique<F> (id ("pad"),   "Pad",   Range (0.f, 1.f, 0.001f), 0.8f, attr (pct)));
+    l.add (std::make_unique<F> (id ("field"), "Field", Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
+    l.add (std::make_unique<juce::AudioParameterChoice> (id ("mode"), "Mode", juce::StringArray { "Major", "Minor", "Dorian", "Mixolydian" }, 1));
+    l.add (std::make_unique<F> (id ("journey"),  "Journey",  Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
+    l.add (std::make_unique<F> (id ("silence"),  "Silence",  Range (0.f, 1.f, 0.001f), 0.45f, attr (pct)));
+    l.add (std::make_unique<F> (id ("depth"),    "Depth",    Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
+    l.add (std::make_unique<F> (id ("surprise"), "Surprise", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<juce::AudioParameterInt> (id ("bars"), "Length (bars)", 8, 480, 120));
+    l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version (0 = new each time)", 0, 9999, 0));
+    l.add (std::make_unique<F> (id ("reverb"), "Reverb", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
+    l.add (std::make_unique<F> (id ("level"),  "Level",  Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
     return l;
 }
 
 PoomseAmbientProcessor::PoomseAmbientProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "PARAMS", createLayout())
+      apvts (*this, nullptr, "PARAMS", createLayout()),
+      seedRng ((uint32_t) juce::Time::currentTimeMillis() | 1u)
 {
     for (int i = 0; i < numRaw; ++i) raw[i] = apvts.getRawParameterValue (kIds[i]);
-    apvts.addParameterListener ("sound", this);
-    buildSound (0);                                   // the first sound is ready when the window opens
+    for (auto& a : activityShown) a.store (0.f);
+    buildFactory();
 }
 
 PoomseAmbientProcessor::~PoomseAmbientProcessor()
 {
-    apvts.removeParameterListener ("sound", this);
-    cancelPendingUpdate();
-    for (int i = 0; i < 500 && building.load() > 0; ++i) juce::Thread::sleep (10);       // a sound that is being made finishes first
+    for (int i = 0; i < 1000 && building.load() > 0; ++i) juce::Thread::sleep (10);       // the sounds that are being made finish first
 }
 
-amb::SamplerParams PoomseAmbientProcessor::readParams() const
+// the four sounds are made in the background, one after the other; the piece can start as soon as the first ones are there
+void PoomseAmbientProcessor::buildFactory()
 {
-    amb::SamplerParams p;
-    p.tone = raw[pTone]->load(); p.bloom = raw[pBloom]->load(); p.tail = raw[pTail]->load(); p.loops = raw[pLoops]->load();
-    p.chord = (int) raw[pChord]->load(); p.latch = raw[pLatch]->load() > 0.5f;
-    return p;
-}
-
-void PoomseAmbientProcessor::prepareToPlay (double sampleRate, int)
-{
-    currentSampleRate = sampleRate;
-    sampler.prepare (sampleRate); echo.prepare (sampleRate); reverb.prepare (sampleRate);
-    audioBank = nullptr;
-    internalBeat = 0.0;
-    levelS.reset (sampleRate, 0.05);
-}
-
-void PoomseAmbientProcessor::publish (std::shared_ptr<const amb::Bank> b)
-{
-    View v;
-    if (! b->zones.empty())
-    {
-        const auto& z = b->zoneFor (60);
-        constexpr int bins = 360;
-        v.peaks.assign ((size_t) bins, 0.f);
-        const int n = z.length();
-        float top = 1e-6f;
-        for (int i = 0; i < n; ++i)
-        {
-            const auto k = (size_t) ((juce::int64) i * bins / n);
-            v.peaks[k] = std::max (v.peaks[k], std::max (std::abs (z.x[0][(size_t) i]), std::abs (z.x[1][(size_t) i])));
-            top = std::max (top, v.peaks[k]);
-        }
-        for (auto& p : v.peaks) p /= top;
-        v.loops = z.loops(); v.loopStart = z.loops() ? (float) z.loopStart / (float) n : 0.f;
-    }
-    {
-        const juce::SpinLock::ScopedLockType lock (viewLock);
-        view = std::move (v);
-    }
-    const juce::SpinLock::ScopedLockType lock (kitLock);
-    if (bank != nullptr) retired.push_back (std::move (bank));
-    bank = std::move (b);
-    retired.erase (std::remove_if (retired.begin(), retired.end(), [] (const auto& p) { return p.use_count() == 1; }), retired.end());
-    viewVersion.fetch_add (1);
-}
-
-PoomseAmbientProcessor::View PoomseAmbientProcessor::getView() const
-{
-    const juce::SpinLock::ScopedLockType lock (viewLock);
-    return view;
-}
-
-// building a sound takes a moment (it is made, not loaded): in the background, and only the last one asked for is put in place
-void PoomseAmbientProcessor::buildSound (int index)
-{
-    wanted.store (index);
-    if (index < 0 || index >= amb::numFactory) index = 0;
-    if (userBank[index] != nullptr) { publish (userBank[index]); return; }
-    {
-        const juce::ScopedLock sl (cacheLock);
-        auto it = cache.find (index);
-        if (it != cache.end()) { publish (it->second); return; }
-    }
     building.fetch_add (1);
-    const double sr = 44100.0;
-    if (bank == nullptr)                              // the very first one: now
+    juce::Thread::launch ([this]
     {
-        auto b = std::shared_ptr<const amb::Bank> (amb::makeFactory (index, sr));
-        { const juce::ScopedLock sl (cacheLock); cache[index] = b; }
-        building.fetch_sub (1);
-        publish (b);
-        return;
-    }
-    juce::Thread::launch ([this, index, sr]
-    {
-        auto b = std::shared_ptr<const amb::Bank> (amb::makeFactory (index, sr));
-        { const juce::ScopedLock sl (cacheLock); cache[index] = b; }
-        if (wanted.load() == index) publish (b);
+        for (int s = 0; s < 4; ++s)
+        {
+            auto b = std::shared_ptr<const amb::Bank> (amb::makeFactory (s, 44100.0));
+            {
+                const juce::SpinLock::ScopedLockType lock (bankLock);
+                factory[s] = b;
+            }
+            if (userBank[s] == nullptr) setCurrent (s, b);
+        }
         building.fetch_sub (1);
     });
 }
 
-void PoomseAmbientProcessor::handleAsyncUpdate() { buildSound (getSoundIndex()); }
+void PoomseAmbientProcessor::setCurrent (int slot, std::shared_ptr<const amb::Bank> b)
+{
+    const juce::SpinLock::ScopedLockType lock (bankLock);
+    if (current[slot] != nullptr) retired.push_back (std::move (current[slot]));
+    current[slot] = std::move (b);
+    retired.erase (std::remove_if (retired.begin(), retired.end(), [] (const auto& p) { return p.use_count() == 1; }), retired.end());
+}
+
+void PoomseAmbientProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+{
+    currentSampleRate = sampleRate;
+    const size_t n = (size_t) std::max (64, samplesPerBlock);
+    for (auto* v : { &dryL, &dryR, &sendL, &sendR }) v->assign (n, 0.f);
+    orchestra.prepare (sampleRate);
+    reverb.prepare (sampleRate); reverb.setSize (0.88f);
+    for (auto& a : audioBank) a = nullptr;
+    levelS.reset (sampleRate, 0.08); reverbS.reset (sampleRate, 0.08);
+    internalBeat = 0.0;
+}
 
 juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, int slot, Loaded& out, int attempts)
 {
@@ -179,7 +136,7 @@ juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, int slot
         const int cat = amb::kSoundCategory[std::clamp (slot, 0, (int) amb::numFactory - 1)];
         b->category = cat;
         juce::String kind;
-        if (cat == amb::Field)                        // a place: let in by the keys, and it loops
+        if (cat == amb::CatField)                        // a place: let in by the keys, and it loops
         {
             b->pitched = false; z.root = 60;
             const int xf = (int) std::min (2.0 * rate, 0.3 * (double) end), n = end - xf;
@@ -189,9 +146,9 @@ juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, int slot
         else
         {
             std::vector<float> m (z.x[0].size()); for (size_t i = 0; i < m.size(); ++i) m[i] = 0.5f * (z.x[0][i] + z.x[1][i]);
-            z.root = amb::detectRootNote (m, rate, cat == amb::Pad ? 48 : 60);
+            z.root = amb::detectRootNote (m, rate, cat == amb::CatPad ? 48 : 60);
             b->pitched = true;
-            if (cat != amb::Short)                    // held: it loops while the key is down
+            if (cat != amb::CatShort)                    // held: it loops while the key is down
             {
                 const int a = (int) (0.35 * (double) end);
                 amb::detail::makeLoop (z, a, end, (int) std::max (16.0, std::min (0.5 * rate, 0.6 * (double) a)));
@@ -213,12 +170,10 @@ juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, int slot
 
 juce::Result PoomseAmbientProcessor::installSound (int slot, const Loaded& loaded, const juce::File& file)
 {
-    if (loaded.bank == nullptr || slot < 0 || slot >= amb::numFactory) return juce::Result::fail ("NOTHING TO LOAD");
+    if (loaded.bank == nullptr || slot < 0 || slot >= 4) return juce::Result::fail ("NOTHING TO LOAD");
     userBank[slot] = loaded.bank;
     apvts.state.setProperty ("file" + juce::String (slot), file.getFullPathName(), nullptr);
-    if (auto* p = apvts.getParameter ("sound")) { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 ((float) slot)); p->endChangeGesture(); }
-    wanted.store (slot);
-    publish (userBank[slot]);
+    setCurrent (slot, userBank[slot]);
     return juce::Result::ok();
 }
 
@@ -231,10 +186,12 @@ juce::Result PoomseAmbientProcessor::loadSound (int slot, const juce::File& file
 
 void PoomseAmbientProcessor::restoreOriginal (int slot)
 {
-    if (slot < 0 || slot >= amb::numFactory) return;
+    if (slot < 0 || slot >= 4) return;
     userBank[slot] = nullptr;
     apvts.state.removeProperty ("file" + juce::String (slot), nullptr);
-    if (getSoundIndex() == slot) buildSound (slot);
+    std::shared_ptr<const amb::Bank> f;
+    { const juce::SpinLock::ScopedLockType lock (bankLock); f = factory[slot]; }
+    if (f != nullptr) setCurrent (slot, f);
 }
 
 juce::String PoomseAmbientProcessor::customName (int slot) const
@@ -242,11 +199,28 @@ juce::String PoomseAmbientProcessor::customName (int slot) const
     return juce::File (apvts.state.getProperty ("file" + juce::String (slot)).toString()).getFileName();
 }
 
-void PoomseAmbientProcessor::uiNote (int note, bool on)
+void PoomseAmbientProcessor::reroll()
 {
-    int s1, n1, s2, n2;
-    uiFifo.prepareToWrite (1, s1, n1, s2, n2);
-    if (n1 > 0) { uiNotes[(size_t) s1] = { note, on }; uiFifo.finishedWrite (1); }
+    if (auto* p = apvts.getParameter ("seed"))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) (1 + juce::Random::getSystemRandom().nextInt (9999))));
+        p->endChangeGesture();
+    }
+}
+
+void PoomseAmbientProcessor::freeVersion()
+{
+    if (auto* p = apvts.getParameter ("seed")) { p->beginChangeGesture(); p->setValueNotifyingHost (0.f); p->endChangeGesture(); }
+}
+
+void PoomseAmbientProcessor::resetToDefaults()
+{
+    for (auto* q : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (q))
+        { rp->beginChangeGesture(); rp->setValueNotifyingHost (rp->getDefaultValue()); rp->endChangeGesture(); }
+    for (int i = 0; i < 4; ++i) restoreOriginal (i);
+    clearRequest.store (true);
 }
 
 void PoomseAmbientProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -255,74 +229,85 @@ void PoomseAmbientProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     buffer.clear();
     if (buffer.getNumChannels() < 2) return;
     {
-        const juce::SpinLock::ScopedTryLockType lock (kitLock);
-        if (lock.isLocked() && bank != audioBank) { audioBank = bank; sampler.setBank (audioBank.get()); }
+        const juce::SpinLock::ScopedTryLockType lock (bankLock);
+        if (lock.isLocked())
+            for (int s = 0; s < 4; ++s)
+                if (current[s] != audioBank[s]) { audioBank[s] = current[s]; orchestra.setBank (s, audioBank[s].get()); }
     }
-    if (clearRequest.exchange (false)) sampler.killAll();
-    if (audioBank == nullptr) return;
+    if (clearRequest.exchange (false)) orchestra.killAll();
 
+    // host timing: the position in beats drives the whole piece (when the host is stopped, time runs by itself so that the keys can be played live)
     double bpm = 120.0, hostBeat = -1.0;
+    int beatsPerBar = 4;
     if (auto* head = getPlayHead())
         if (auto pos = head->getPosition())
         {
             if (auto b = pos->getBpm()) bpm = *b;
-            if (auto ppq = pos->getPpqPosition()) hostBeat = *ppq;
-            if (! pos->getIsPlaying()) hostBeat = -1.0;
+            if (auto ppq = pos->getPpqPosition()) if (pos->getIsPlaying()) hostBeat = *ppq;
+            if (auto ts = pos->getTimeSignature()) beatsPerBar = std::max (1, ts->numerator * 4 / std::max (1, ts->denominator));
         }
     const int n = buffer.getNumSamples();
-    const double spq = currentSampleRate * 60.0 / std::max (20.0, bpm);
     const double beatStart = hostBeat >= 0.0 ? hostBeat : internalBeat;
-    internalBeat = beatStart + (double) n / spq;
+    const double spb = currentSampleRate * 60.0 / std::max (20.0, bpm);
+    internalBeat = beatStart + (double) n / spb;
 
-    const amb::SamplerParams p = readParams();
-    float* L = buffer.getWritePointer (0);
-    float* R = buffer.getWritePointer (1);
-    int pos = 0;
-    auto render = [&] (int upTo)
-    {
-        if (upTo > pos) { sampler.process (upTo - pos, p, beatStart + (double) pos / spq, bpm, L + pos, R + pos); pos = upTo; }
-    };
-    {
-        int s1, n1, s2, n2;
-        uiFifo.prepareToRead (uiFifo.getNumReady(), s1, n1, s2, n2);
-        for (int i = 0; i < n1; ++i) { const auto u = uiNotes[(size_t) (s1 + i)]; if (u.on) sampler.noteOn (u.note, 0.8f, p, beatStart); else sampler.noteOff (u.note); }
-        for (int i = 0; i < n2; ++i) { const auto u = uiNotes[(size_t) (s2 + i)]; if (u.on) sampler.noteOn (u.note, 0.8f, p, beatStart); else sampler.noteOff (u.note); }
-        uiFifo.finishedRead (n1 + n2);
-    }
+    amb::GlobalParams gp;
+    gp.mode = (int) raw[pMode]->load(); gp.journey = raw[pJourney]->load(); gp.silence = raw[pSilence]->load();
+    gp.depth = raw[pDepth]->load(); gp.surprise = raw[pSurprise]->load(); gp.pieceBars = (int) raw[pBars]->load(); gp.beatsPerBar = beatsPerBar;
+    amb::LayerParams lps[amb::kNumLayers];
+    for (int l = 0; l < amb::kNumLayers; ++l) lps[l].amount = raw[amb::kLayerSlot[l]]->load();     // short, long, pad, field: slots 0..3 are the first four parameters
+
+    const int pv = previewMask.exchange (0);
+    for (int s = 0; s < 4; ++s) if (pv & (1 << s)) orchestra.preview (s, s == 2 ? 48 : s == 1 ? 67 : 60);
+
+    // MIDI: a held note is the key and the length of the piece; its release ends it
     for (const auto meta : midi)
     {
         const auto m = meta.getMessage();
-        render (std::clamp (meta.samplePosition, 0, n));
-        const double beatNow = beatStart + (double) pos / spq;
-        if (m.isNoteOn())        sampler.noteOn (m.getNoteNumber(), m.getFloatVelocity(), p, beatNow);
-        else if (m.isNoteOff())  sampler.noteOff (m.getNoteNumber());
-        else if (m.isAllNotesOff() || m.isAllSoundOff()) sampler.allNotesOff();
+        const double beat = beatStart + (double) meta.samplePosition / spb;
+        if (m.isNoteOn())
+        {
+            int s = (int) raw[pSeed]->load();
+            if (s <= 0) s = 1 + (int) (seedRng.nextU32() % 9999u);
+            seedInUse.store (s);
+            orchestra.noteOn (m.getNoteNumber(), (uint32_t) s, beat, gp);
+        }
+        else if (m.isNoteOff())                          orchestra.noteOff (m.getNoteNumber(), beat);
+        else if (m.isAllNotesOff() || m.isAllSoundOff()) orchestra.allNotesOff();
     }
-    render (n);
 
-    const float space = raw[pSpace]->load();
-    const float echoTime = (float) (spq * 0.75);
+    reverbS.setTargetValue (raw[pReverb]->load());
     levelS.setTargetValue (juce::Decibels::decibelsToGain (raw[pLevel]->load()));
-    for (int i = 0; i < n; ++i)
+    float* L = buffer.getWritePointer (0);
+    float* R = buffer.getWritePointer (1);
+    const int chunk = (int) dryL.size();
+    for (int off = 0; off < n; off += chunk)
     {
-        float el = L[i], er = R[i];
-        echo.process (el, er, echoTime, 0.4f, 0.3f * space);
-        float rl = 0.f, rr = 0.f;
-        reverb.process (el, er, rl, rr);
-        const float g = levelS.getNextValue();
-        L[i] = (el + rl * space * 1.1f) * g;
-        R[i] = (er + rr * space * 1.1f) * g;
+        const int c = std::min (chunk, n - off);
+        for (auto* v : { &dryL, &dryR, &sendL, &sendR }) std::fill (v->begin(), v->begin() + c, 0.f);
+        orchestra.process (c, beatStart + (double) off / spb, bpm, gp, lps, dryL.data(), dryR.data(), sendL.data(), sendR.data());
+        for (int i = 0; i < c; ++i)
+        {
+            float rl, rr;
+            reverb.process (sendL[(size_t) i], sendR[(size_t) i], rl, rr);
+            const float rv = reverbS.getNextValue() * 1.4f, g = levelS.getNextValue();
+            L[off + i] = std::tanh ((dryL[(size_t) i] + rl * rv) * g);
+            R[off + i] = std::tanh ((dryR[(size_t) i] + rr * rv) * g);
+        }
     }
-}
 
-void PoomseAmbientProcessor::resetToDefaults()
-{
-    for (auto* q : getParameters())
-        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (q))
-        { rp->beginChangeGesture(); rp->setValueNotifyingHost (rp->getDefaultValue()); rp->endChangeGesture(); }
-    for (int i = 0; i < amb::numFactory; ++i) restoreOriginal (i);
-    clearRequest.store (true);
-    buildSound (0);
+    // what the interface shows
+    running.store (orchestra.pieceRunning());
+    progressShown.store (orchestra.progress());
+    chordRootShown.store (orchestra.chordRoot());
+    chordQualityShown.store (orchestra.chordDim() ? 2 : orchestra.chordMinor() ? 1 : 0);
+    moodShown.store (orchestra.mood());
+    for (int s = 0; s < 4; ++s)
+    {
+        float a = 0.f;
+        for (int l = 0; l < amb::kNumLayers; ++l) if (amb::kLayerSlot[l] == s) a = std::max (a, orchestra.layerActivity (l));
+        activityShown[(size_t) s].store (a);
+    }
 }
 
 juce::AudioProcessorEditor* PoomseAmbientProcessor::createEditor() { return new PoomseAmbientEditor (*this); }
@@ -338,14 +323,12 @@ void PoomseAmbientProcessor::setStateInformation (const void* data, int size)
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
-            for (int k = 0; k < amb::numFactory; ++k)
+            for (int k = 0; k < 4; ++k)
             {
-                userBank[k] = nullptr;
                 const auto path = apvts.state.getProperty ("file" + juce::String (k)).toString();
                 if (path.isNotEmpty() && juce::File (path).existsAsFile()) loadSound (k, juce::File (path));
-                else apvts.state.removeProperty ("file" + juce::String (k), nullptr);
+                else { apvts.state.removeProperty ("file" + juce::String (k), nullptr); restoreOriginal (k); }
             }
-            triggerAsyncUpdate();
         }
 }
 

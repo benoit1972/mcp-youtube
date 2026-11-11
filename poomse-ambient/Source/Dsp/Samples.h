@@ -22,12 +22,12 @@ struct Zone                                  // one recording, for the keys arou
     bool loops() const { return loopEnd > loopStart && loopStart >= 0; }
 };
 
-enum Category { Short = 0, Sustained, Pad, Field, numCategories };
+enum Category { CatShort = 0, CatSustained, CatPad, CatField, numCategories };
 struct Bank
 {
     std::vector<Zone> zones;
     bool pitched = true;                     // false: a place. The keys do not change its pitch, they let it in.
-    int category = Short;
+    int category = CatShort;
     const Zone& zoneFor (int note) const
     {
         const Zone* best = &zones.front(); int bd = 1 << 20;
@@ -39,7 +39,7 @@ struct Bank
 enum Sound { SPiano = 0, SViolin, SPad, SForest, numFactory };
 inline constexpr const char* kSoundNames[numFactory] = { "Piano", "Violin", "Pad", "Forest" };
 inline constexpr const char* kSoundTags[numFactory] = { "short, a piano note", "long, a bowed note", "a held open chord", "a place: birds and wind" };
-inline constexpr int kSoundCategory[numFactory] = { Short, Sustained, Pad, Field };
+inline constexpr int kSoundCategory[numFactory] = { CatShort, CatSustained, CatPad, CatField };
 inline constexpr const char* kCategoryNames[numCategories] = { "SHORT", "SUSTAINED", "PAD", "FIELD" };
 
 namespace detail
