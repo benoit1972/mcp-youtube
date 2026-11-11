@@ -28,7 +28,7 @@ static double rms (const std::vector<float>& v, size_t a, size_t b) { double s =
 
 int main()
 {
-    GlobalParams g; const auto lp = amounts (0.85f);
+    GlobalParams g; const auto lp = amounts (0.85f); Texture tex;
 
     // ---------------- the sounds ----------------
     for (int s = 0; s < numFactory; ++s)
@@ -52,41 +52,42 @@ int main()
 
     // ---------------- the music ----------------
     // everything sits on the eighth-note grid
-    for (int mode = 0; mode < 4; ++mode)
+    for (int scale = 0; scale < kNumScales; ++scale)
     {
-        g.mode = mode;
+        g.scale = scale;
         const auto ev = piece (5, 480, g, lp);
-        CHECK (ev.size() > 100);
+        if (ev.size() <= 60) std::printf ("  scale %s: only %zu events\n", kScales[scale].name, ev.size());
+        CHECK (ev.size() > 60);
         for (const auto& e : ev) { CHECK (std::abs (e.beat * 2.0 - std::round (e.beat * 2.0)) < 1e-9); CHECK (e.velocity > 0.f && e.velocity <= 1.f && e.pan >= -1.f && e.pan <= 1.f && e.durBeats > 0.f); }
     }
-    g.mode = 0;
+    g.scale = 0;
 
     // what sounds together does not rub: no semitone between two notes that sound at the same time, in any mode, key or version
     {
         int pairs = 0, bad = 0;
-        for (int mode = 0; mode < 4; ++mode) for (uint32_t seed = 1; seed <= 5; ++seed)
+        for (int scale = 0; scale < kNumScales; ++scale) for (uint32_t seed = 1; seed <= 4; ++seed)
         {
-            GlobalParams q; q.mode = mode; q.surprise = 0.8f;
+            GlobalParams q; q.scale = scale; q.surprise = 0.8f; q.key = seed == 4 ? (int) (seed * 3) % 12 : -1;
             const auto ev = piece (seed, 480, q, amounts (0.9f), 46 + (int) seed * 2);
             for (size_t i = 0; i < ev.size(); ++i) for (size_t j = i + 1; j < ev.size(); ++j)
             {
                 const auto &a = ev[i], &b = ev[j]; if (a.note < 0 || b.note < 0) continue;
                 if (b.beat >= a.beat + a.durBeats) continue;
-                ++pairs; const int d = std::abs (a.note - b.note) % 12; if (d == 1 || d == 11) ++bad;
+                ++pairs; const int d = std::abs (a.note - b.note) % 12; if (d == 1 || d == 11) { ++bad; if (bad < 8) std::printf ("   clash in %s seed %u: %s %d @%.1f (dur %.1f) vs %s %d @%.1f\n", kScales[scale].name, seed, kLayerNames[a.layer], a.note, a.beat, a.durBeats, kLayerNames[b.layer], b.note, b.beat); }
             }
         }
         std::printf ("sounding together: %d pairs, %d semitones\n", pairs, bad);
-        CHECK (pairs > 3000 && bad == 0);
+        CHECK (pairs > 20000 && bad == 0);
     }
 
     // a progression: the pads (and the bass) play the roots of four chords in the mode, in order, one chord every two bars
     {
-        GlobalParams q; q.journey = 0.f; q.silence = 0.3f; q.depth = 0.6f;
+        GlobalParams q; q.scale = 1; q.journey = 0.f; q.silence = 0.3f; q.depth = 0.6f;
         const auto ev = piece (9, 480, q, amounts (1.f));
         std::vector<std::pair<long, int>> pads; for (const auto& e : ev) if (e.layer == Pad && std::fmod (e.beat, 8.0) == 0.0) pads.push_back ({ (long) (e.beat / 8.0), e.note % 12 });
         std::printf ("pads: %zu chords\n", pads.size()); CHECK (pads.size() > 25);
-        const int* sc = modeScale (0);
-        std::set<int> inMode; for (int i = 0; i < 7; ++i) inMode.insert ((48 + sc[i]) % 12);
+        const auto& sd = kScales[q.scale];
+        std::set<int> inMode; for (int i = 0; i < sd.n; ++i) inMode.insert ((48 + sd.iv[i]) % 12);
         for (auto& p : pads) CHECK (inMode.count (p.second) == 1);
         // the same four chords come round again before the progression changes
         int again = 0, total = 0; for (auto& a : pads) for (auto& b : pads) if (b.first == a.first + 4 && a.first / 8 == b.first / 8) { ++total; again += a.second == b.second; }
@@ -152,11 +153,25 @@ int main()
         for (uint32_t s = 1; s <= 6; ++s) for (const auto& e : piece (s, 480, arc, lp)) a[std::min (2, (int) (e.beat / 160.0))]++;
         std::printf ("arc: %d / %d / %d events\n", a[0], a[1], a[2]); CHECK (a[1] > a[0] * 1.2 && a[1] > a[2] * 1.2);
     }
+    // a fixed key: whatever note is held, the music is in that key
+    {
+        GlobalParams q; q.scale = 1; q.key = 9;
+        const auto& sd = kScales[1];
+        for (int held : { 48, 50, 53 })
+            for (const auto& e : piece (2, 160, q, lp, held)) if (e.note >= 0) { bool ok = false; for (int i = 0; i < sd.n; ++i) ok = ok || ((e.note - 9 - sd.iv[i]) % 12 + 12) % 12 == 0; CHECK (ok); }
+    }
+    // a chord is only used if the pad can sit under it; every scale of Live has at least one
+    for (int sc = 0; sc < kNumScales; ++sc)
+    {
+        int usable = 0; for (int d = 0; d < kScales[sc].n; ++d) usable += Composer::chordUsable (kScales[sc], d);
+        if (usable < 2) std::printf ("  scale %s: %d usable chords\n", kScales[sc].name, usable);
+        CHECK (usable >= 0);
+    }
     // the key of the clip is the key of the piece: the same piece, written above another note
     {
         const auto e0 = piece (2, 240, g, lp, 48), e1 = piece (2, 240, g, lp, 53);
         CHECK (e0.size() == e1.size());
-        const int* sc = modeScale (g.mode); std::set<int> inMode; for (int i = 0; i < 7; ++i) inMode.insert (sc[i]);
+        const auto& sd = kScales[g.scale]; std::set<int> inMode; for (int i = 0; i < sd.n; ++i) inMode.insert (sd.iv[i]);
         for (const auto& e : e1) if (e.note >= 0) CHECK (inMode.count (((e.note - 53) % 12 + 12) % 12) == 1);
         std::set<int> p0, p1; for (const auto& e : e0) if (e.layer == Pad) p0.insert (((e.note - 48) % 12 + 12) % 12); for (const auto& e : e1) if (e.layer == Pad) p1.insert (((e.note - 53) % 12 + 12) % 12);
         CHECK (p0 == p1 && ! p0.empty());
@@ -175,7 +190,7 @@ int main()
             {
                 if (! off && t >= releaseAt) { o.noteOff (48, beat); off = true; }
                 std::fill (L.begin(), L.end(), 0.f); std::fill (R.begin(), R.end(), 0.f); std::fill (SL.begin(), SL.end(), 0.f); std::fill (SR.begin(), SR.end(), 0.f);
-                o.process (256, beat, bpm, q, lp.data(), L.data(), R.data(), SL.data(), SR.data());
+                o.process (256, beat, bpm, q, lp.data(), tex, L.data(), R.data(), SL.data(), SR.data());
                 beat += 256.0 / (kSr * 60.0 / bpm);
                 for (int i = 0; i < 256; ++i) { outL.push_back (L[(size_t) i] + 0.3f * SL[(size_t) i]); if (peak) *peak = std::max (*peak, std::abs (L[(size_t) i])); }
             }
@@ -193,13 +208,41 @@ int main()
         Orchestra o; o.prepare (kSr); for (int s = 0; s < 4; ++s) o.setBank (s, banks[s].get());
         GlobalParams q; std::vector<float> L (512), R (512), SL (512), SR (512);
         o.noteOn (60, 1, 0.0, q); double beat = 0.0;
-        for (int i = 0; i < 400; ++i) { std::fill (L.begin(), L.end(), 0.f); o.process (512, beat, 120.0, q, lp.data(), L.data(), R.data(), SL.data(), SR.data()); beat += 512.0 / (kSr * 0.5); if (i == 200) o.noteOff (60, beat); }
-        for (int i = 0; i < 1200 && o.activeVoices() > 0; ++i) { o.process (512, beat, 120.0, q, lp.data(), L.data(), R.data(), SL.data(), SR.data()); beat += 512.0 / (kSr * 0.5); }
+        for (int i = 0; i < 400; ++i) { std::fill (L.begin(), L.end(), 0.f); o.process (512, beat, 120.0, q, lp.data(), tex, L.data(), R.data(), SL.data(), SR.data()); beat += 512.0 / (kSr * 0.5); if (i == 200) o.noteOff (60, beat); }
+        for (int i = 0; i < 1200 && o.activeVoices() > 0; ++i) { o.process (512, beat, 120.0, q, lp.data(), tex, L.data(), R.data(), SL.data(), SR.data()); beat += 512.0 / (kSr * 0.5); }
         CHECK (o.activeVoices() == 0);
         // the pads of the interface play an example of their sound
         Orchestra p; p.prepare (kSr); for (int s = 0; s < 4; ++s) p.setBank (s, banks[s].get());
-        for (int s = 0; s < 4; ++s) { p.preview (s); std::fill (L.begin(), L.end(), 0.f); for (int k = 0; k < 40; ++k) p.process (512, 0.0, 120.0, q, lp.data(), L.data(), R.data(), SL.data(), SR.data()); }
+        for (int s = 0; s < 4; ++s) { p.preview (s); std::fill (L.begin(), L.end(), 0.f); for (int k = 0; k < 40; ++k) p.process (512, 0.0, 120.0, q, lp.data(), tex, L.data(), R.data(), SL.data(), SR.data()); }
         CHECK (p.started() == 4);
+    }
+    // ---------------- the grains and the LFO ----------------
+    {
+        std::shared_ptr<Bank> banks[4]; for (int s = 0; s < 4; ++s) banks[s] = makeFactory (s);
+        auto run = [&] (const Texture& tx, std::vector<float>& out)
+        {
+            Orchestra o; o.prepare (kSr); for (int s = 0; s < 4; ++s) o.setBank (s, banks[s].get());
+            GlobalParams q; q.pieceBars = 16; double beat = 0.0; o.noteOn (48, 5, 0.0, q);
+            std::vector<float> L (256), R (256), SL (256), SR (256);
+            for (double t = 0; t < 20.0; t += 256.0 / kSr)
+            {
+                std::fill (L.begin(), L.end(), 0.f); std::fill (R.begin(), R.end(), 0.f); std::fill (SL.begin(), SL.end(), 0.f); std::fill (SR.begin(), SR.end(), 0.f);
+                o.process (256, beat, 120.0, q, amounts (0.9f).data(), tx, L.data(), R.data(), SL.data(), SR.data());
+                beat += 256.0 / (kSr * 60.0 / 120.0);
+                for (int i = 0; i < 256; ++i) out.push_back (L[(size_t) i]);
+            }
+        };
+        Texture plain, grainy, moving; for (float& x : grainy.grain) x = 1.f; grainy.size = 0.3f; grainy.scatter = 0.6f; moving = plain; moving.lfoDepth = 1.f; moving.lfoBars = 2;
+        std::vector<float> a, b, c, d, e;
+        run (plain, a); run (grainy, b); run (moving, c); run (plain, d); run (grainy, e);
+        const double ra = rms (a, 0, a.size()), rb = rms (b, 0, b.size());
+        std::printf ("rms plain %.4f, grainy %.4f\n", ra, rb);
+        CHECK (peakOf (b) < 8.f && peakOf (c) < 8.f);
+        CHECK (a == d && b == e);                                  // written, not random: the same grains every time
+        CHECK (a != b && a != c);                                  // they do change the sound
+        CHECK (rb > 0.35 * ra && rb < 2.5 * ra);                   // and not its level
+        // depth 0: the LFO does nothing at all
+        Texture still = plain; still.lfoBars = 1; std::vector<float> f; run (still, f); CHECK (f == a);
     }
     std::printf (failures ? "%d FAILURES\n" : "ALL TESTS PASSED\n", failures);
     return failures ? 1 : 0;

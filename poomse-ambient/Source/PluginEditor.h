@@ -69,10 +69,13 @@ private:
     PaperLookAndFeel laf;
     PoomseAmbientProcessor& proc;
     PieceView view;
-    juce::OwnedArray<Knob> amountKnobs, knobs;
+    juce::OwnedArray<Knob> amountKnobs, grainKnobs, knobs;
+    juce::ComboBox scaleBox, keyBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> scaleAttachment, keyAttachment;
+    int selectedPad = 0;
     juce::OwnedArray<SoundPad> pads;
     juce::StringArray helps;
-    juce::TextButton resetButton { "Reset" }, rerollButton { "Reroll" }, freeButton { "New each time" };
+    juce::TextButton resetButton { "Reset" }, rerollButton { "Reroll" }, freeButton { "New each time" }, randomButton { "Random" };
     juce::String helpText;
     int hovered = -1, shownSeed = -1;
     bool resetArmed = false;

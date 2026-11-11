@@ -41,7 +41,8 @@ struct Event
 
 struct GlobalParams
 {
-    int mode = 0;              // 0 major, 1 minor, 2 dorian, 3 mixolydian
+    int scale = 1;             // index into kScales
+    int key = -1;              // pitch class of the key (0 = C), or -1 = the pitch of the held note
     float journey = 0.7f;      // 0 = stationary, 1 = full arc (builds up, peaks, fades)
     float silence = 0.5f;      // 0 = busy, 1 = lots of silence
     float depth = 0.5f;        // 0 = mostly light moments, 1 = mostly deep moments
@@ -51,19 +52,27 @@ struct GlobalParams
 };
 struct LayerParams { float amount = 0.7f; };      // how much of this layer there is (0 = it does not play)
 
-inline constexpr const char* kModeNames[4] = { "Major", "Minor", "Dorian", "Mixolydian" };
-inline const int* modeScale (int mode)
-{
-    static const int s[4][7] = { { 0, 2, 4, 5, 7, 9, 11 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 3, 5, 7, 9, 10 }, { 0, 2, 4, 5, 7, 9, 10 } };
-    return s[std::clamp (mode, 0, 3)];
-}
-// progressions as scale degrees (0 = I). None of them puts a chord whose root is a semitone away from the previous one.
-inline constexpr int kProg[4][6][4] = {
-    { { 0, 4, 5, 3 }, { 0, 5, 3, 4 }, { 0, 3, 5, 4 }, { 5, 3, 0, 4 }, { 0, 3, 0, 4 }, { 0, 5, 4, 3 } },                // major
-    { { 0, 5, 2, 6 }, { 0, 3, 6, 2 }, { 0, 6, 5, 6 }, { 0, 2, 6, 3 }, { 0, 5, 3, 6 }, { 0, 3, 0, 6 } },                // minor
-    { { 0, 3, 0, 6 }, { 0, 3, 6, 3 }, { 0, 6, 3, 0 }, { 0, 4, 3, 6 }, { 0, 6, 0, 3 }, { 0, 3, 4, 0 } },                // dorian
-    { { 0, 6, 3, 0 }, { 0, 3, 6, 3 }, { 0, 6, 3, 6 }, { 0, 4, 3, 0 }, { 0, 3, 0, 6 }, { 0, 6, 0, 3 } },                // mixolydian
+// The scales of Ableton Live (same names). The plugin cannot read the scale that is set in the clip, so choose the same one here.
+struct ScaleDef { const char* name; int n; int iv[8]; };
+inline constexpr ScaleDef kScales[] = {
+    { "Major", 7, { 0, 2, 4, 5, 7, 9, 11, 0 } },          { "Minor", 7, { 0, 2, 3, 5, 7, 8, 10, 0 } },
+    { "Dorian", 7, { 0, 2, 3, 5, 7, 9, 10, 0 } },         { "Mixolydian", 7, { 0, 2, 4, 5, 7, 9, 10, 0 } },
+    { "Lydian", 7, { 0, 2, 4, 6, 7, 9, 11, 0 } },         { "Phrygian", 7, { 0, 1, 3, 5, 7, 8, 10, 0 } },
+    { "Locrian", 7, { 0, 1, 3, 5, 6, 8, 10, 0 } },        { "Whole Tone", 6, { 0, 2, 4, 6, 8, 10, 0, 0 } },
+    { "Half-whole Dim.", 8, { 0, 1, 3, 4, 6, 7, 9, 10 } }, { "Whole-half Dim.", 8, { 0, 2, 3, 5, 6, 8, 9, 11 } },
+    { "Minor Blues", 6, { 0, 3, 5, 6, 7, 10, 0, 0 } },    { "Minor Pentatonic", 5, { 0, 3, 5, 7, 10, 0, 0, 0 } },
+    { "Major Pentatonic", 5, { 0, 2, 4, 7, 9, 0, 0, 0 } }, { "Harmonic Minor", 7, { 0, 2, 3, 5, 7, 8, 11, 0 } },
+    { "Harmonic Major", 7, { 0, 2, 4, 5, 7, 8, 11, 0 } }, { "Dorian #4", 7, { 0, 2, 3, 6, 7, 9, 10, 0 } },
+    { "Phrygian Dominant", 7, { 0, 1, 4, 5, 7, 8, 10, 0 } }, { "Melodic Minor", 7, { 0, 2, 3, 5, 7, 9, 11, 0 } },
+    { "Lydian Augmented", 7, { 0, 2, 4, 6, 8, 9, 11, 0 } }, { "Lydian Dominant", 7, { 0, 2, 4, 6, 7, 9, 10, 0 } },
+    { "Super Locrian", 7, { 0, 1, 3, 4, 6, 8, 10, 0 } },  { "8-Tone Spanish", 8, { 0, 1, 3, 4, 5, 6, 8, 10 } },
+    { "Bhairav", 7, { 0, 1, 4, 5, 7, 8, 11, 0 } },        { "Hungarian Minor", 7, { 0, 2, 3, 6, 7, 8, 11, 0 } },
+    { "Hirajoshi", 5, { 0, 2, 3, 7, 8, 0, 0, 0 } },       { "In-Sen", 5, { 0, 1, 5, 7, 10, 0, 0, 0 } },
+    { "Iwato", 5, { 0, 1, 5, 6, 10, 0, 0, 0 } },          { "Kumoi", 5, { 0, 2, 3, 7, 9, 0, 0, 0 } },
+    { "Pelog Selisir", 5, { 0, 1, 3, 7, 8, 0, 0, 0 } },   { "Pelog Tembung", 5, { 0, 1, 5, 7, 8, 0, 0, 0 } },
 };
+inline constexpr int kNumScales = (int) (sizeof (kScales) / sizeof (kScales[0]));
+inline constexpr const char* kKeyNames[13] = { "From the note", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
 enum Mood { Light = 0, Deep = 1, Still = 2 };
 inline constexpr float kMoodGain[3][kNumLayers] = {      // by layer: keys, violin, pad, bells, field, bass
@@ -92,6 +101,7 @@ struct ChordInfo
     int degree = 0, rootPc = 0, thirdPc = 4, fifthPc = 7;      // pitch classes above the tonic
     bool minor = false, dim = false;
     uint16_t allowed = 0;                                       // pitch classes (above the tonic) that do not rub against the triad
+    bool padOk = true;                                          // the open fifth of the pad fits this chord (else the pad stays silent for it)
 };
 
 class Composer
@@ -103,9 +113,9 @@ public:
 
     bool running() const { return active; }
     float progress() const { return active ? lastProgress : -1.f; }
-    int tonicNote() const { return tonic; }
+    int tonicNote() const { return tEff; }
     int mood() const { return curMood; }
-    int chordRoot() const { return (tonic + curChord.rootPc) % 12; }
+    int chordRoot() const { return (tEff + curChord.rootPc) % 12; }
     bool chordMinor() const { return curChord.minor; }
     bool chordDim() const { return curChord.dim; }
     double startBeatOfPiece() const { return origin; }
@@ -122,23 +132,60 @@ public:
     void stop() { active = false; }
     void setTonic (int tonicNote) { tonic = tonicNote; }
 
-    // the chord of chord number c (0 = the first)
+    // Is the chord on this degree one the pad can sit under? Root, third, fifth and the open fifth of the pad (root + 7) never a semitone apart.
+    static bool chordUsable (const ScaleDef& sd, int d, int* pcs = nullptr, bool withPad = true)
+    {
+        auto pc = [&] (int k) { return (sd.iv[k % sd.n] + 12 * (k / sd.n)) % 12; };
+        const int r = pc (d), t = pc (d + 2), f = pc (d + 4), o = withPad ? (r + 7) % 12 : r, set[4] = { r, t, f, o };
+        for (int a = 0; a < 4; ++a) for (int b = a + 1; b < 4; ++b) { const int diff = std::abs (set[a] - set[b]) % 12; if (diff == 1 || diff == 11) return false; }
+        if (pcs) { pcs[0] = r; pcs[1] = t; pcs[2] = f; }
+        return true;
+    }
+
+    // the chord of chord number c (0 = the first). The progression has four chords and is rewritten every eight chords, from the scale.
     ChordInfo chordInfo (long c, const GlobalParams& g) const
     {
-        const int* sc = modeScale (g.mode);
-        const int prog = (int) (mixHash (seed, (uint32_t) (c / 8), 5u) % 6u);
-        const int deg = kProg[std::clamp (g.mode, 0, 3)][prog][((c % 4) + 4) % 4];
-        auto pc = [&] (int d) { return (sc[d % 7] + 12 * (d / 7)) % 12; };
+        const ScaleDef& sd = kScales[std::clamp (g.scale, 0, kNumScales - 1)];
+        auto pc = [&] (int k) { return (sd.iv[k % sd.n] + 12 * (k / sd.n)) % 12; };
+        int usable[8]; int nu = 0;
+        for (int d = 0; d < sd.n; ++d) if (chordUsable (sd, d)) usable[nu++] = d;
+        if (nu < 3) { nu = 0; for (int d = 0; d < sd.n; ++d) if (chordUsable (sd, d, nullptr, false)) usable[nu++] = d; }      // too few chords fit the pad: more chords, and the pad rests on the others
+        int deg = 0;
+        if (nu > 0)
+        {
+            const uint32_t grp = (uint32_t) (c / 8);
+            int prev = -1;
+            deg = usable[0];
+            for (int k = 0; k <= (int) (((c % 4) + 4) % 4); ++k)
+            {
+                if (k == 0) { deg = (nu > 1 && grp > 0 && unitOf (mixHash (seed, grp, 71u)) < 0.35f) ? usable[(int) (mixHash (seed, grp, 72u) % (uint32_t) nu)] : usable[0]; prev = deg; continue; }
+                float w[8]; float total = 0.f;
+                for (int u = 0; u < nu; ++u)
+                {
+                    const int m = (pc (usable[u]) - pc (prev) + 12) % 12;
+                    float x = 0.f;
+                    if (usable[u] != prev && m != 1 && m != 11)
+                        x = (m == 5 || m == 7) ? 3.f : (m == 3 || m == 4 || m == 8 || m == 9) ? 2.f : m == 2 || m == 10 ? 1.f : 0.2f;
+                    if (k == 3 && usable[u] == usable[0]) x *= 0.5f;           // the last chord leads back rather than arrives
+                    w[u] = x; total += x;
+                }
+                if (total <= 0.f) { deg = prev; continue; }
+                float r = unitOf (mixHash (seed, grp, 73u, (uint32_t) k)) * total; int pick = nu - 1;
+                for (int u = 0; u < nu; ++u) { r -= w[u]; if (r <= 0.f && w[u] > 0.f) { pick = u; break; } }
+                deg = usable[pick]; prev = deg;
+            }
+        }
         ChordInfo ci; ci.degree = deg; ci.rootPc = pc (deg); ci.thirdPc = pc (deg + 2); ci.fifthPc = pc (deg + 4);
         const int third = (ci.thirdPc - ci.rootPc + 12) % 12, fifth = (ci.fifthPc - ci.rootPc + 12) % 12;
-        ci.minor = third == 3; ci.dim = fifth == 6;
-        for (int i = 0; i < 7; ++i)
+        ci.minor = third == 3; ci.dim = third != 3 && third != 4; (void) fifth;                 // dim: here, a chord that is neither major nor minor (sus, open...)
+        ci.padOk = chordUsable (sd, deg);
+        const int avoid[4] = { ci.rootPc, ci.thirdPc, ci.fifthPc, ci.padOk ? (ci.rootPc + 7) % 12 : ci.rootPc };
+        for (int i = 0; i < sd.n; ++i)
         {
             bool ok = true;
-            for (int ct : { ci.rootPc, ci.thirdPc, ci.fifthPc }) { const int d = std::abs (sc[i] - ct) % 12; if (d == 1 || d == 11) ok = false; }
-            if (ok) ci.allowed |= (uint16_t) (1u << sc[i]);
+            for (int ct : avoid) { const int d = std::abs (sd.iv[i] - ct) % 12; if (d == 1 || d == 11) ok = false; }
+            if (ok) ci.allowed |= (uint16_t) (1u << sd.iv[i]);
         }
-        // and no two of them a semitone apart either: of such a pair only the chord tone (or else the lower one) stays
         auto isChordTone = [&] (int pcx) { return pcx == ci.rootPc || pcx == ci.thirdPc || pcx == ci.fifthPc; };
         for (int pcx = 0; pcx < 12; ++pcx)
         {
@@ -149,12 +196,14 @@ public:
                 else ci.allowed &= (uint16_t) ~(1u << up);
             }
         }
+        for (int ct : { ci.rootPc, ci.thirdPc, ci.fifthPc }) ci.allowed |= (uint16_t) (1u << ct);        // a chord tone is always allowed
         return ci;
     }
 
     int advance (double b0, double b1, const GlobalParams& g, const LayerParams* layers, Event* out, int maxOut)
     {
         if (! active) return 0;
+        tEff = g.key < 0 ? tonic : tonic - (((tonic - g.key) % 12) + 12) % 12;
         int count = 0;
         for (auto& a : activity) a *= 0.9995f;
         const long s0 = std::max (nextStep, (long) std::ceil ((b0 - origin) / step - 1e-9)), s1 = (long) std::ceil ((b1 - origin) / step - 1e-9);
@@ -229,7 +278,7 @@ private:
     {
         const unsigned m = mask < 0 ? (unsigned) ci.allowed : (unsigned) mask;
         int n = 0;
-        for (int note = lo; note <= hi && n < maxN; ++note) if (m & (1u << (((note - tonic) % 12 + 12) % 12))) out[n++] = note;
+        for (int note = lo; note <= hi && n < maxN; ++note) if (m & (1u << (((note - tEff) % 12 + 12) % 12))) out[n++] = note;
         return n;
     }
     // the notes of the last two beats of a chord lead into the next one: only the notes that fit both
@@ -240,7 +289,7 @@ private:
         int bits = 0; for (int i = 0; i < 12; ++i) bits += (both >> i) & 1;
         return bits >= 2 ? both : ci.allowed;
     }
-    int rootNear (int pc, int lowest) const { int n = lowest + (((tonic + pc) % 12 - lowest % 12) + 12) % 12; return n; }
+    int rootNear (int pc, int lowest) const { int n = lowest + (((tEff + pc) % 12 - lowest % 12) + 12) % 12; return n; }
 
     bool keysPlays (long c, int k, double rel, const GlobalParams& g, const LayerParams* lp, float baseProb)
     {
@@ -277,7 +326,7 @@ private:
         if (sc == 0)                                                      // ---- the chord changes ----
         {
             // pad: the root of the chord, held for the whole chord
-            if (unitOf (mixHash (seed, (uint32_t) c, 21u)) < layerProb (Pad, rel, g, lp[Pad], 0.95f))
+            if (ci.padOk && unitOf (mixHash (seed, (uint32_t) c, 21u)) < layerProb (Pad, rel, g, lp[Pad], 0.95f))
                 mk (Pad, rootNear (ci.rootPc, 48), (0.5f + 0.3f * unitOf (mixHash (seed, (uint32_t) c, 22u))) * gainArc, t, (float) cb, 0.f);
             // bass: the root, two octaves under the motif
             if (unitOf (mixHash (seed, (uint32_t) c, 23u)) < layerProb (Bass, rel, g, lp[Bass], 0.85f))
@@ -287,10 +336,10 @@ private:
             {
                 int tones[24]; const int n = tonesOf (ci, 57, 79, tones, 24, chordInfo (c + 1, g).allowed & ci.allowed);
                 int best = -1, bd = 1 << 20;
-                const int want = violinNote < 0 ? tonic + 12 + 12 : violinNote;
+                const int want = violinNote < 0 ? tEff + 12 + 12 : violinNote;
                 for (int i = 0; i < n; ++i)
                 {
-                    const int pcx = ((tones[i] - tonic) % 12 + 12) % 12;
+                    const int pcx = ((tones[i] - tEff) % 12 + 12) % 12;
                     if (pcx != ci.rootPc && pcx != ci.thirdPc && pcx != ci.fifthPc) continue;       // a chord tone
                     if (violinNote >= 0 && std::abs (tones[i] - violinNote) == 1) continue;
                     const int d = std::abs (tones[i] - want) * 4 + (int) (mixHash (seed, (uint32_t) c, 26u, (uint32_t) i) % 3u);
@@ -356,7 +405,7 @@ private:
         const float r = unitOf (mixHash (seed, (uint32_t) c, 52u));
         auto mk = [&] (int layer, int note, float vel, double beat, float dur)
         {
-            Event e; e.layer = layer; e.note = note; e.velocity = vel; e.beat = beat; e.durBeats = (layer == Bass || layer == Pad) ? dur : (float) std::clamp ((double) dur, 0.5, std::max (0.5, t + chordBeats (g) - 1.0 - beat)); e.pan = 0.25f * (unitOf (mixHash (seed, (uint32_t) beat * 7u, 53u)) - 0.5f);
+            Event e; e.layer = layer; e.note = note; e.velocity = vel; e.beat = beat; e.durBeats = (layer == Bass || layer == Pad) ? (float) std::clamp ((double) dur, 0.5, std::max (0.5, t + chordBeats (g) - beat)) : (float) std::clamp ((double) dur, 0.5, std::max (0.5, t + chordBeats (g) - 1.0 - beat)); e.pan = 0.25f * (unitOf (mixHash (seed, (uint32_t) beat * 7u, 53u)) - 0.5f);
             push (out, count, maxOut, e); activity[(size_t) layer] = 1.f;
         };
         int tones[24];
@@ -369,7 +418,7 @@ private:
         else if (r < 0.60f && lp[Bass].amount > 0.f && lp[Pad].amount > 0.f)                                   // the floor drops
         {
             mk (Bass, rootNear (ci.rootPc, 24), 0.85f, t + 0.5, 12.f);
-            mk (Pad, rootNear (ci.rootPc, 48), 0.7f, t + 0.5, 16.f);
+            if (ci.padOk) mk (Pad, rootNear (ci.rootPc, 48), 0.7f, t + 0.5, 16.f);
             pauseUntil = t + (double) g.beatsPerBar;          // and one bar of silence above it
         }
         else if (r < 0.85f && lp[Bells].amount > 0.f)         // a cascade of bells
@@ -389,7 +438,7 @@ private:
     double origin = 0.0, pauseUntil = -1e9, nextField = 0.0;
     uint32_t seed = 1;
     long nextStep = 0;
-    int tonic = 48, curMood = Light, violinNote = -1;
+    int tonic = 48, tEff = 48, curMood = Light, violinNote = -1;
     float lastProgress = 0.f;
     ChordInfo curChord;
     std::vector<int> moods;

@@ -2,7 +2,7 @@
 
 namespace
 {
-constexpr int kWidth = 780, kHeight = 640, kPad = 28;
+constexpr int kWidth = 780, kHeight = 800, kPad = 28;
 constexpr float kInset = 14.f;
 const char* const kAudioExt = "wav;aif;aiff;mp3;flac;m4a;ogg;caf";
 const char* const kNoteNames[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -48,7 +48,7 @@ void PieceView::paint (juce::Graphics& g)
     g.setColour (on ? look::ink : look::rule);
     g.setFont (look::caps (40.f, true, 0.05f));
     const int q = proc.chordQuality();
-    const juce::String chord = on ? juce::String (kNoteNames[((proc.chordRoot() % 12) + 12) % 12]) + (q == 1 ? "m" : q == 2 ? "dim" : "") : juce::String ("--");
+    const juce::String chord = on ? juce::String (kNoteNames[((proc.chordRoot() % 12) + 12) % 12]) + (q == 1 ? "m" : q == 2 ? "sus" : "") : juce::String ("--");
     g.drawText (chord, m.getX(), m.getY() + 16.f, 140.f, 52.f, juce::Justification::centredLeft, false);
     g.setFont (look::caps (10.f, true, 0.16f));
     g.setColour (on ? look::accent : look::dim);
@@ -113,12 +113,13 @@ PoomseAmbientEditor::PoomseAmbientEditor (PoomseAmbientProcessor& p) : AudioProc
     addAndMakeVisible (view);
 
     static const char* titles[4] = { "Short", "Long", "Pad", "Field" };
-    static const char* tags[4] = { "a piano: melody, bells and bass", "a violin, held", "an open chord, held", "a place: birds and wind" };
+    static const char* tags[4] = { "piano - drop yours here", "violin - drop yours here", "chord - drop yours here", "a place - drop yours here" };
     static const char* ids[4] = { "short", "long", "pad", "field" };
+    static const char* gids[4] = { "gshort", "glong", "gpad", "gfield" };
     for (int i = 0; i < 4; ++i)
     {
         auto* pad = pads.add (new SoundPad (titles[i], tags[i]));
-        pad->onDown = [this, i] { proc.preview (i); };
+        pad->onDown = [this, i] { selectedPad = i; proc.preview (i); repaint(); };
         pad->onFiles = [this, i] (const juce::StringArray& files)
         {
             for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) { load (ff, i); return; } }
@@ -126,9 +127,9 @@ PoomseAmbientEditor::PoomseAmbientEditor (PoomseAmbientProcessor& p) : AudioProc
         };
         pad->onRestore = [this, i] { if (proc.isCustom (i)) { proc.restoreOriginal (i); view.showMessage ("THE ORIGINAL SOUND IS BACK", 5); } };
         addAndMakeVisible (pad);
-        makeKnob (amountKnobs, ids[i], "Amount", "How much of this sound there is in the piece. Click the pad to hear it. Drop your own sound on it to replace it (right-click: the original).");
+        makeKnob (amountKnobs, ids[i], "Amount", "How much of this sound there is in the piece. Click the pad to hear it. Drop your own sound on the pad to replace it (right-click the pad: the original is back).");
+        makeKnob (grainKnobs, gids[i], "Grains", "Plays this sound as a cloud of small grains, so a held note is never twice the same. Low: the sound as it is. High: a shimmering texture.");
     }
-    makeKnob (knobs, "mode", "Mode", "The colour of the harmony: bright, sad, floating (Dorian) or open (Mixolydian).");
     makeKnob (knobs, "silence", "Silence", "How much room there is: low is busy, high leaves long silences.");
     makeKnob (knobs, "depth", "Depth", "Light moments (the piano motif, the bells) or deep ones (violin, bass, pad).");
     makeKnob (knobs, "surprise", "Surprise", "How often something unexpected happens: a falling phrase, a drop, a cascade of bells. It always stays in the harmony.");
@@ -136,6 +137,17 @@ PoomseAmbientEditor::PoomseAmbientEditor (PoomseAmbientProcessor& p) : AudioProc
     makeKnob (knobs, "bars", "Length", "The length of the piece, in bars. The note you hold in the clip decides when it really stops.");
     makeKnob (knobs, "reverb", "Reverb", "How far away it all sounds.");
     makeKnob (knobs, "level", "Level", "Output level.");
+    makeKnob (knobs, "gsize", "Grain size", "The length of the grains: short is grainy and fine, long is smooth and blurred.");
+    makeKnob (knobs, "scatter", "Scatter", "How far the grains wander in time and in pitch: more is more shimmering and less steady.");
+    makeKnob (knobs, "move", "Movement", "A slow LFO, in time with the tempo, that moves the grains, the brightness and the stereo position of each sound, each one at its own moment.");
+    makeKnob (knobs, "rate", "Speed", "How long one turn of the movement takes: from one bar to sixteen.");
+
+    for (int i = 0; i < amb::kNumScales; ++i) scaleBox.addItem (amb::kScales[i].name, i + 1);
+    for (int i = 0; i < 13; ++i) keyBox.addItem (amb::kKeyNames[i], i + 1);
+    scaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, "scale", scaleBox);
+    keyAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, "key", keyBox);
+    addAndMakeVisible (scaleBox); addAndMakeVisible (keyBox);
+    randomButton.setComponentID ("ink"); randomButton.onClick = [this] { proc.randomise(); }; addAndMakeVisible (randomButton);
 
     resetButton.setComponentID ("pill"); rerollButton.setComponentID ("ink"); freeButton.setComponentID ("pill");
     resetButton.onClick = [this]
@@ -159,8 +171,9 @@ PoomseAmbientEditor::~PoomseAmbientEditor() { stopTimer(); setLookAndFeel (nullp
 void PoomseAmbientEditor::timerCallback()
 {
     int h = -1;
-    for (int i = 0; i < amountKnobs.size(); ++i) if (amountKnobs[i]->slider.isMouseOverOrDragging()) h = i;
-    for (int i = 0; i < knobs.size(); ++i) if (knobs[i]->slider.isMouseOverOrDragging()) h = amountKnobs.size() + i;
+    for (int i = 0; i < amountKnobs.size(); ++i) if (amountKnobs[i]->slider.isMouseOverOrDragging()) h = i * 2;
+    for (int i = 0; i < grainKnobs.size(); ++i) if (grainKnobs[i]->slider.isMouseOverOrDragging()) h = i * 2 + 1;
+    for (int i = 0; i < knobs.size(); ++i) if (knobs[i]->slider.isMouseOverOrDragging()) h = 8 + i;
     if (h != hovered) { hovered = h; repaint(); }
     for (int i = 0; i < pads.size(); ++i) { pads[i]->setActivity (proc.slotActivity (i)); pads[i]->setCustom (proc.isCustom (i) ? proc.customName (i) : juce::String()); }
     const int seed = proc.getSeed();
@@ -192,10 +205,16 @@ bool PoomseAmbientEditor::isInterestedInFileDrag (const juce::StringArray& files
     return false;
 }
 
-void PoomseAmbientEditor::filesDropped (const juce::StringArray&, int, int)
+void PoomseAmbientEditor::filesDropped (const juce::StringArray& files, int, int)
 {
+    // dropped on the pad itself, the sound goes to that pad (the pad takes the drop). Anywhere else: one file goes to the pad you clicked last,
+    // several files go to the four pads in order (short, long, pad, field)
     view.setDropHover (false);
-    view.showMessage ("DROP THE SOUND ON THE PAD YOU WANT TO REPLACE");       // (a drop on a pad is taken by the pad itself)
+    juce::Array<juce::File> usable;
+    for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) usable.add (ff); }
+    if (usable.isEmpty()) { view.showMessage ("NOTHING USABLE WAS DROPPED (A FILE FROM THE FINDER IS EXPECTED)"); return; }
+    if (usable.size() == 1) { load (usable[0], selectedPad); return; }
+    for (int i = 0; i < std::min (4, usable.size()); ++i) load (usable[i], i);
 }
 
 void PoomseAmbientEditor::disarmReset() { resetArmed = false; resetButton.setButtonText ("Reset"); }
@@ -213,31 +232,41 @@ void PoomseAmbientEditor::paint (juce::Graphics& g)
     g.setFont (look::caps (9.5f, true, 0.14f));
     g.setColour (look::dim);
     g.drawText (shownSeed > 0 ? "VERSION " + juce::String (shownSeed) : juce::String ("A NEW PIECE EVERY TIME"), rerollButton.getX() - 60, 50, rerollButton.getWidth() + 120, 12, juce::Justification::centred, false);
+    g.setFont (look::caps (9.5f, true, 0.14f));
+    g.setColour (look::dim);
+    g.drawText ("KEY", keyBox.getX(), keyBox.getY() - 13, 60, 12, juce::Justification::centredLeft, false);
+    g.drawText ("SCALE (THE SAME AS IN YOUR CLIP)", scaleBox.getX(), scaleBox.getY() - 13, 260, 12, juce::Justification::centredLeft, false);
+    g.drawText ("THE FOUR SOUNDS  -  DROP YOUR OWN ON ANY PAD", kPad, 98, 420, 12, juce::Justification::centredLeft, false);
     g.setColour (look::ink);
     g.setFont (juce::Font (juce::FontOptions (12.5f)));
-    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Hold a note in a clip and the piece plays by itself. The four pads are its sounds: click one to hear it, drop your own on it to replace it."),
+    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Hold a note in a clip and the piece plays by itself. Choose the same scale as in your clip. Drop your own sounds on the four pads (or four files at once on the window)."),
                 kPad, getHeight() - 36, getWidth() - 2 * kPad, 20, juce::Justification::centredLeft, false);
 }
 
 void PoomseAmbientEditor::resized()
 {
-    resetButton.setBounds (getWidth() - kPad - 80, 18, 80, 30);
-    freeButton.setBounds (resetButton.getX() - 8 - 120, 18, 120, 30);
-    rerollButton.setBounds (freeButton.getX() - 8 - 90, 18, 90, 30);
+    resetButton.setBounds (getWidth() - kPad - 74, 18, 74, 30);
+    freeButton.setBounds (resetButton.getX() - 8 - 116, 18, 116, 30);
+    rerollButton.setBounds (freeButton.getX() - 8 - 82, 18, 82, 30);
+    randomButton.setBounds (rerollButton.getX() - 8 - 82, 18, 82, 30);
+    keyBox.setBounds (kPad, 72, 130, 26);
+    scaleBox.setBounds (kPad + 142, 72, 220, 26);
     const int contentW = getWidth() - 2 * kPad;
     const int pw = contentW / pads.size();
     for (int i = 0; i < pads.size(); ++i)
     {
-        pads[i]->setBounds (kPad + i * pw, 74, pw, 96);
-        juce::Rectangle<int> cell (kPad + i * pw, 174, pw, 118);
-        amountKnobs[i]->name.setBounds (cell.removeFromTop (16));
-        amountKnobs[i]->slider.setBounds (cell);
+        pads[i]->setBounds (kPad + i * pw, 116, pw, 92);
+        juce::Rectangle<int> cell (kPad + i * pw, 212, pw, 112);
+        auto left = cell.removeFromLeft (pw / 2);
+        amountKnobs[i]->name.setBounds (left.removeFromTop (16)); amountKnobs[i]->slider.setBounds (left);
+        grainKnobs[i]->name.setBounds (cell.removeFromTop (16)); grainKnobs[i]->slider.setBounds (cell);
     }
-    view.setBounds (kPad, 302, contentW, 134);
-    const int cw = contentW / knobs.size();
+    view.setBounds (kPad, 336, contentW, 128);
+    const int perRow = 7;
+    const int cw = contentW / perRow;
     for (int i = 0; i < knobs.size(); ++i)
     {
-        juce::Rectangle<int> cell (kPad + i * cw, 452, cw, 130);
+        juce::Rectangle<int> cell (kPad + (i % perRow) * cw, 476 + (i / perRow) * 124, cw, 120);
         knobs[i]->name.setBounds (cell.removeFromTop (16));
         knobs[i]->slider.setBounds (cell);
     }

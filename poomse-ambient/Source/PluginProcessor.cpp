@@ -4,8 +4,9 @@
 namespace
 {
 using Range = juce::NormalisableRange<float>;
-enum { pShort, pLong, pPad, pField, pMode, pJourney, pSilence, pDepth, pSurprise, pBars, pSeed, pReverb, pLevel, numRaw };
-const char* const kIds[numRaw] = { "short", "long", "pad", "field", "mode", "journey", "silence", "depth", "surprise", "bars", "seed", "reverb", "level" };
+enum { pShort, pLong, pPad, pField, pScale, pKey, pJourney, pSilence, pDepth, pSurprise, pBars, pSeed, pReverb, pLevel, pGShort, pGLong, pGPad, pGField, pGSize, pScatter, pMove, pRate, numRaw };
+const char* const kIds[numRaw] = { "short", "long", "pad", "field", "scale", "key", "journey", "silence", "depth", "surprise", "bars", "seed", "reverb", "level", "gshort", "glong", "gpad", "gfield", "gsize", "scatter", "move", "rate" };
+constexpr int kLfoBars[5] = { 1, 2, 4, 8, 16 };
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::createLayout()
@@ -20,7 +21,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::crea
     l.add (std::make_unique<F> (id ("long"),  "Long",  Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
     l.add (std::make_unique<F> (id ("pad"),   "Pad",   Range (0.f, 1.f, 0.001f), 0.8f, attr (pct)));
     l.add (std::make_unique<F> (id ("field"), "Field", Range (0.f, 1.f, 0.001f), 0.6f, attr (pct)));
-    l.add (std::make_unique<juce::AudioParameterChoice> (id ("mode"), "Mode", juce::StringArray { "Major", "Minor", "Dorian", "Mixolydian" }, 1));
+    {
+        juce::StringArray scales, keys;
+        for (int i = 0; i < amb::kNumScales; ++i) scales.add (amb::kScales[i].name);
+        for (int i = 0; i < 13; ++i) keys.add (amb::kKeyNames[i]);
+        l.add (std::make_unique<juce::AudioParameterChoice> (id ("scale"), "Scale", scales, 1));
+        l.add (std::make_unique<juce::AudioParameterChoice> (id ("key"), "Key", keys, 0));
+    }
     l.add (std::make_unique<F> (id ("journey"),  "Journey",  Range (0.f, 1.f, 0.001f), 0.7f, attr (pct)));
     l.add (std::make_unique<F> (id ("silence"),  "Silence",  Range (0.f, 1.f, 0.001f), 0.45f, attr (pct)));
     l.add (std::make_unique<F> (id ("depth"),    "Depth",    Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
@@ -29,6 +36,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::crea
     l.add (std::make_unique<juce::AudioParameterInt> (id ("seed"), "Version (0 = new each time)", 0, 9999, 0));
     l.add (std::make_unique<F> (id ("reverb"), "Reverb", Range (0.f, 1.f, 0.001f), 0.5f, attr (pct)));
     l.add (std::make_unique<F> (id ("level"),  "Level",  Range (-48.f, 6.f, 0.1f), 0.f, attr ([] (float x, int) { return juce::String (x, 1) + " dB"; })));
+    l.add (std::make_unique<F> (id ("gshort"), "Grains (short)", Range (0.f, 1.f, 0.001f), 0.f, attr (pct)));
+    l.add (std::make_unique<F> (id ("glong"),  "Grains (long)",  Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<F> (id ("gpad"),   "Grains (pad)",   Range (0.f, 1.f, 0.001f), 0.4f, attr (pct)));
+    l.add (std::make_unique<F> (id ("gfield"), "Grains (field)", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<F> (id ("gsize"),  "Grain size", Range (0.f, 1.f, 0.001f), 0.4f, attr ([] (float x, int) { return juce::String (juce::roundToInt (30.f + 370.f * x)) + " ms"; })));
+    l.add (std::make_unique<F> (id ("scatter"), "Scatter", Range (0.f, 1.f, 0.001f), 0.3f, attr (pct)));
+    l.add (std::make_unique<F> (id ("move"),   "Movement", Range (0.f, 1.f, 0.001f), 0.35f, attr (pct)));
+    l.add (std::make_unique<juce::AudioParameterChoice> (id ("rate"), "Movement speed", juce::StringArray { "1 bar", "2 bars", "4 bars", "8 bars", "16 bars" }, 2));
     return l;
 }
 
@@ -214,6 +229,20 @@ void PoomseAmbientProcessor::freeVersion()
     if (auto* p = apvts.getParameter ("seed")) { p->beginChangeGesture(); p->setValueNotifyingHost (0.f); p->endChangeGesture(); }
 }
 
+// new settings and a new version, within what sounds good
+void PoomseAmbientProcessor::randomise()
+{
+    juce::Random rng;
+    auto set = [this] (const char* id, float v) { if (auto* q = apvts.getParameter (id)) { q->beginChangeGesture(); q->setValueNotifyingHost (q->convertTo0to1 (v)); q->endChangeGesture(); } };
+    auto between = [&] (float a, float b) { return a + (b - a) * rng.nextFloat(); };
+    set ("scale", (float) rng.nextInt (amb::kNumScales));
+    set ("silence", between (0.2f, 0.8f)); set ("depth", between (0.1f, 0.9f)); set ("surprise", between (0.1f, 0.6f)); set ("journey", between (0.4f, 0.95f));
+    set ("short", between (0.5f, 0.95f)); set ("long", between (0.3f, 0.85f)); set ("pad", between (0.5f, 0.95f)); set ("field", between (0.2f, 0.8f));
+    set ("gshort", rng.nextFloat() < 0.5f ? 0.f : between (0.f, 0.5f)); set ("glong", between (0.f, 0.7f)); set ("gpad", between (0.1f, 0.8f)); set ("gfield", between (0.f, 0.7f));
+    set ("gsize", between (0.1f, 0.9f)); set ("scatter", between (0.1f, 0.7f)); set ("move", between (0.1f, 0.7f)); set ("rate", (float) rng.nextInt (5));
+    reroll();
+}
+
 void PoomseAmbientProcessor::resetToDefaults()
 {
     for (auto* q : getParameters())
@@ -252,11 +281,14 @@ void PoomseAmbientProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     internalBeat = beatStart + (double) n / spb;
 
     amb::GlobalParams gp;
-    gp.mode = (int) raw[pMode]->load(); gp.journey = raw[pJourney]->load(); gp.silence = raw[pSilence]->load();
+    gp.scale = (int) raw[pScale]->load(); gp.key = (int) raw[pKey]->load() - 1; gp.journey = raw[pJourney]->load(); gp.silence = raw[pSilence]->load();
     gp.depth = raw[pDepth]->load(); gp.surprise = raw[pSurprise]->load(); gp.pieceBars = (int) raw[pBars]->load(); gp.beatsPerBar = beatsPerBar;
     amb::LayerParams lps[amb::kNumLayers];
     for (int l = 0; l < amb::kNumLayers; ++l) lps[l].amount = raw[amb::kLayerSlot[l]]->load();     // short, long, pad, field: slots 0..3 are the first four parameters
 
+    amb::Texture tex;
+    for (int k = 0; k < 4; ++k) tex.grain[k] = raw[pGShort + k]->load();
+    tex.size = raw[pGSize]->load(); tex.scatter = raw[pScatter]->load(); tex.lfoDepth = raw[pMove]->load(); tex.lfoBars = kLfoBars[std::clamp ((int) raw[pRate]->load(), 0, 4)];
     const int pv = previewMask.exchange (0);
     for (int s = 0; s < 4; ++s) if (pv & (1 << s)) orchestra.preview (s, s == 2 ? 48 : s == 1 ? 67 : 60);
 
@@ -285,7 +317,7 @@ void PoomseAmbientProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     {
         const int c = std::min (chunk, n - off);
         for (auto* v : { &dryL, &dryR, &sendL, &sendR }) std::fill (v->begin(), v->begin() + c, 0.f);
-        orchestra.process (c, beatStart + (double) off / spb, bpm, gp, lps, dryL.data(), dryR.data(), sendL.data(), sendR.data());
+        orchestra.process (c, beatStart + (double) off / spb, bpm, gp, lps, tex, dryL.data(), dryR.data(), sendL.data(), sendR.data());
         for (int i = 0; i < c; ++i)
         {
             float rl, rr;
@@ -300,7 +332,7 @@ void PoomseAmbientProcessor::processBlock (juce::AudioBuffer<float>& buffer, juc
     running.store (orchestra.pieceRunning());
     progressShown.store (orchestra.progress());
     chordRootShown.store (orchestra.chordRoot());
-    chordQualityShown.store (orchestra.chordDim() ? 2 : orchestra.chordMinor() ? 1 : 0);
+    chordQualityShown.store (orchestra.chordDim() ? 2 : orchestra.chordMinor() ? 1 : 0);          // 2: neither major nor minor
     moodShown.store (orchestra.mood());
     for (int s = 0; s < 4; ++s)
     {

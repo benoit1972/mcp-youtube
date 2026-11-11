@@ -13,9 +13,21 @@
 // the piece); letting go of it ends the piece softly.
 namespace amb
 {
+// How the sounds are worked: each of the four sounds can be played as a cloud of small grains (so a held note is never the same twice), and a slow
+// LFO, synchronised to the tempo, moves the grain size, the grain mix, the brightness and the stereo position of each sound, each one at its own phase.
+struct Texture
+{
+    float grain[4] { 0.f, 0.f, 0.f, 0.f };    // how much of each sound is played as grains (0 = the sound as it is)
+    float size = 0.4f;                        // grain length, 30 ms .. 400 ms
+    float scatter = 0.3f;                     // how far the grains wander in time and in pitch
+    int lfoBars = 4;                          // length of one turn of the LFO, in bars
+    float lfoDepth = 0.f;                     // how much the LFO moves things (0 = nothing moves)
+};
+
 class Orchestra
 {
 public:
+    static constexpr int maxBlock = 512;
     static constexpr int maxVoices = 64;
 
     void prepare (double sampleRate) { sr = sampleRate; for (auto& v : voices) v = Voice{}; held.fill (false); composer.stop(); pendingStop = false; }
@@ -57,7 +69,7 @@ public:
     }
 
     // one block; adds into L/R (dry) and sendL/sendR (what goes to the reverb)
-    void process (int n, double beatStart, double bpm, const GlobalParams& g, const LayerParams* layers,
+    void process (int n, double beatStart, double bpm, const GlobalParams& g, const LayerParams* layers, const Texture& tex,
                   float* L, float* R, float* sendL, float* sendR)
     {
         const double spb = sr * 60.0 / std::clamp (bpm, 20.0, 400.0);
@@ -80,7 +92,42 @@ public:
         const int ne = composer.advance (beatStart, beatEnd, g, layers, ev, Composer::maxEvents);
         for (int i = 0; i < ne; ++i)
             spawn (ev[i], (int) std::clamp ((ev[i].beat - beatStart) * spb, 0.0, (double) (n - 1)), spb, false);
-        render (n, L, R, sendL, sendR);
+
+        const double lfoBeats = std::max (1, tex.lfoBars) * (double) std::max (1, g.beatsPerBar);
+        const double lfoInc = 1.0 / (lfoBeats * spb);
+        for (int off = 0; off < n; off += maxBlock)
+        {
+            const int c = std::min (maxBlock, n - off);
+            for (int k = 0; k < 4; ++k) { std::fill (busL[(size_t) k].begin(), busL[(size_t) k].begin() + c, 0.f); std::fill (busR[(size_t) k].begin(), busR[(size_t) k].begin() + c, 0.f);
+                                           std::fill (busSL[(size_t) k].begin(), busSL[(size_t) k].begin() + c, 0.f); std::fill (busSR[(size_t) k].begin(), busSR[(size_t) k].begin() + c, 0.f); }
+            // what the LFO does to each sound for this part of the block
+            const double phase0 = std::fmod ((beatStart + (double) off / spb) / lfoBeats, 1.0);
+            const float depth = std::clamp (tex.lfoDepth, 0.f, 1.f);
+            for (int k = 0; k < 4; ++k)
+            {
+                const double ph = phase0 + 0.25 * k;
+                const float u = 0.5f - 0.5f * (float) std::cos (6.2831853 * ph), sv = (float) std::sin (6.2831853 * ph + 0.9);
+                slotGrain[(size_t) k] = std::clamp (tex.grain[k] * (1.f + 0.7f * depth * sv), 0.f, 1.f);
+                slotSize[(size_t) k] = std::clamp (tex.size * std::exp2 (1.2f * depth * sv), 0.f, 1.f);
+                slotCut[(size_t) k] = 16000.f * std::pow (0.1f, depth * u);
+                const float th = (0.5f + 0.35f * depth * (float) std::sin (6.2831853 * ph * 0.5 + (double) k)) * 1.5707963f;
+                slotGl[(size_t) k] = 1.4142f * std::cos (th); slotGr[(size_t) k] = 1.4142f * std::sin (th);
+            }
+            render (c, tex);
+            for (int k = 0; k < 4; ++k)
+            {
+                const float lk = 1.f - std::exp (-6.2831853f * std::min (slotCut[(size_t) k], 0.45f * (float) sr) / (float) sr);
+                auto& f = fx[(size_t) k];
+                for (int i = 0; i < c; ++i)
+                {
+                    float sig[4] = { busL[(size_t) k][(size_t) i], busR[(size_t) k][(size_t) i], busSL[(size_t) k][(size_t) i], busSR[(size_t) k][(size_t) i] };
+                    for (int q = 0; q < 4; ++q) { f.a[q] += lk * (sig[q] - f.a[q]); f.b[q] += lk * (f.a[q] - f.b[q]); sig[q] = f.b[q]; }
+                    L[off + i] += sig[0] * slotGl[(size_t) k]; R[off + i] += sig[1] * slotGr[(size_t) k];
+                    sendL[off + i] += sig[2] * slotGl[(size_t) k]; sendR[off + i] += sig[3] * slotGr[(size_t) k];
+                }
+            }
+        }
+        (void) lfoInc;
     }
 
     bool pieceRunning() const { return composer.running(); }
@@ -101,6 +148,10 @@ private:
         const Zone* zone = nullptr;
         double pos = 0.0, inc = 1.0;
         float gl = 0.f, gr = 0.f, send = 0.f;
+        struct Grain { bool on = false; double pos = 0.0, inc = 1.0; int age = 0, len = 1; };
+        Grain grains[4];
+        int nextGrain = 0;
+        uint32_t rng = 1;
     };
 
     int heldCount() const { int c = 0; for (bool h : held) c += h; return c; }
@@ -137,6 +188,7 @@ private:
         const float g = e.velocity * gainOf[e.layer];
         v->gl = std::cos (angle) * 1.4142f * g; v->gr = std::sin (angle) * 1.4142f * g;
         v->send = preview ? 0.3f : sendOf[e.layer];
+        v->rng = 0x9E3779B1u * (uint32_t) (startedCount + 1) + 17u;
         ++startedCount;
     }
 
@@ -161,12 +213,19 @@ private:
         l = out[0]; r = out[1];
     }
 
-    void render (int n, float* L, float* R, float* sendL, float* sendR)
+    static float rnd (uint32_t& st) { st ^= st << 13; st ^= st >> 17; st ^= st << 5; return (float) (st >> 8) * (2.0f / 16777216.0f) - 1.0f; }       // [-1, 1)
+
+    void render (int n, const Texture& tex)
     {
         for (auto& v : voices)
         {
             if (! v.active) continue;
             const Zone& z = *v.zone;
+            const int slot = kLayerSlot[v.layer];
+            auto& oL = busL[(size_t) slot]; auto& oR = busR[(size_t) slot]; auto& oSL = busSL[(size_t) slot]; auto& oSR = busSR[(size_t) slot];
+            const float mix = slotGrain[(size_t) slot];
+            const int glen = std::max (64, (int) ((0.03f + 0.37f * slotSize[(size_t) slot]) * (float) sr));
+            const float scatter = std::clamp (tex.scatter, 0.f, 1.f);
             for (int i = 0; i < n; ++i)
             {
                 if (v.delay > 0) { --v.delay; continue; }
@@ -183,8 +242,37 @@ private:
                 if (! z.loops() && v.pos >= (double) (z.length() - 3)) { v = Voice{}; break; }
                 float l, r;
                 read (z, v.pos, l, r);
+                if (mix > 0.002f)
+                {
+                    // a cloud of grains around the place where the note is: each one a little earlier or later and a little out of tune
+                    if (--v.nextGrain <= 0)
+                    {
+                        v.nextGrain = std::max (1, glen / 4);
+                        for (auto& gr : v.grains)
+                            if (! gr.on)
+                            {
+                                gr.on = true; gr.age = 0; gr.len = glen;
+                                gr.pos = v.pos + (double) rnd (v.rng) * scatter * 0.25 * z.sampleRate;
+                                if (gr.pos < 0.0) gr.pos = z.loops() ? gr.pos + (double) (z.loopEnd - z.loopStart) : 0.0;
+                                gr.inc = v.inc * std::exp2 ((double) rnd (v.rng) * scatter * 0.35 / 12.0);
+                                break;
+                            }
+                    }
+                    float gl = 0.f, grr = 0.f;
+                    for (auto& gr : v.grains)
+                    {
+                        if (! gr.on) continue;
+                        float a, b; read (z, gr.pos, a, b);
+                        const float w = 0.5f - 0.5f * std::cos (6.2831853f * (float) gr.age / (float) gr.len);
+                        gl += a * w; grr += b * w;
+                        gr.pos += gr.inc;
+                        if (z.loops() && gr.pos >= (double) z.loopEnd) gr.pos -= (double) (z.loopEnd - z.loopStart);
+                        if (++gr.age >= gr.len || (! z.loops() && gr.pos >= (double) (z.length() - 3))) gr.on = false;
+                    }
+                    l = l * (1.f - mix) + 0.5f * gl * mix; r = r * (1.f - mix) + 0.5f * grr * mix;
+                }
                 const float ol = l * env * v.gl, orr = r * env * v.gr;
-                L[i] += ol; R[i] += orr; sendL[i] += ol * v.send; sendR[i] += orr * v.send;
+                oL[(size_t) i] += ol; oR[(size_t) i] += orr; oSL[(size_t) i] += ol * v.send; oSR[(size_t) i] += orr * v.send;
                 v.pos += v.inc;
                 if (z.loops() && v.pos >= (double) z.loopEnd) v.pos -= (double) (z.loopEnd - z.loopStart);
             }
@@ -199,5 +287,9 @@ private:
     std::array<const Bank*, 4> banks {};
     bool pendingStop = false;
     int startedCount = 0;
+    struct SlotFx { float a[4] { 0.f, 0.f, 0.f, 0.f }, b[4] { 0.f, 0.f, 0.f, 0.f }; };
+    std::array<std::array<float, maxBlock>, 4> busL {}, busR {}, busSL {}, busSR {};
+    std::array<float, 4> slotGrain {}, slotSize {}, slotCut { 16000.f, 16000.f, 16000.f, 16000.f }, slotGl { 1.f, 1.f, 1.f, 1.f }, slotGr { 1.f, 1.f, 1.f, 1.f };
+    std::array<SlotFx, 4> fx {};
 };
 } // namespace amb

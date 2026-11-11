@@ -47,6 +47,7 @@ public:
 
     void preview (int slot) { previewMask.fetch_or (1 << slot); }
     void reroll();
+    void randomise();
     void freeVersion();
     void resetToDefaults();
 
