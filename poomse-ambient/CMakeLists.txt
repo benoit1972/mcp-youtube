@@ -25,7 +25,7 @@ else()
   set(PA_FORMATS Standalone)
 endif()
 
-# An INSTRUMENT (aumu): one long MIDI note in a clip = the key and the length of a generative piece.
+# An INSTRUMENT (aumu): four sounds made from scratch (a piano note, a bowed note, an open chord, a forest), played by the keys.
 juce_add_plugin(PoomseAmbient
   COMPANY_NAME "Benoit"
   PLUGIN_MANUFACTURER_CODE Benp
@@ -42,8 +42,8 @@ target_sources(PoomseAmbient PRIVATE
   Source/PluginProcessor.cpp Source/PluginProcessor.h
   Source/PluginEditor.cpp Source/PluginEditor.h
   Source/Look.h
-  Source/Dsp/Rng.h Source/Dsp/Generative.h Source/Dsp/Engine.h Source/Dsp/Cloud.h Source/Dsp/Fx.h
-  Source/Dsp/PitchDetect.h Source/Dsp/Reverb.h Source/Dsp/Presets.h Source/Dsp/Util.h)
+  Source/Dsp/Rng.h Source/Dsp/Samples.h Source/Dsp/Sampler.h Source/Dsp/Fx.h Source/Dsp/PitchDetect.h
+  Source/Dsp/Reverb.h Source/Dsp/Aiff.h)
 
 target_compile_definitions(PoomseAmbient PUBLIC
   JUCE_WEB_BROWSER=0

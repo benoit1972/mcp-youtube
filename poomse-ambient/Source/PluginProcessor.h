@@ -1,14 +1,14 @@
 #pragma once
+#include <map>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
-#include "Dsp/Engine.h"
-#include "Dsp/Presets.h"
-#include "Dsp/Util.h"
+#include "Dsp/Sampler.h"
+#include "Dsp/Fx.h"
 #include "Dsp/Reverb.h"
+#include "Dsp/PitchDetect.h"
+#include "Dsp/Aiff.h"
 
-class PoomseAmbientProcessor : public juce::AudioProcessor,
-                               private juce::AudioProcessorValueTreeState::Listener,
-                               private juce::AsyncUpdater
+class PoomseAmbientProcessor : public juce::AudioProcessor, private juce::AsyncUpdater, private juce::AudioProcessorValueTreeState::Listener
 {
 public:
     PoomseAmbientProcessor();
@@ -16,7 +16,7 @@ public:
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
-    bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
+    bool isBusesLayoutSupported (const BusesLayout& l) const override { return l.getMainOutputChannelSet() == juce::AudioChannelSet::stereo(); }
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -25,7 +25,7 @@ public:
     const juce::String getName() const override { return "Poomse Ambient"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
-    double getTailLengthSeconds() const override { return 12.0; }
+    double getTailLengthSeconds() const override { return 8.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -36,69 +36,54 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // ---- message thread ----
-    bool loadSample (int slot, const juce::File& file);
-    juce::String getSampleName (int slot) const;
-    std::vector<float> getPeaks (int slot) const;
-    bool slotUsesBuiltIn (int slot) const;
+    // a dropped sound: read and cut in the background (with new attempts: a file arriving from iCloud is not readable at once), then put in place
+    struct Loaded { std::shared_ptr<amb::Bank> bank; juce::String info; };
+    static juce::Result readSound (const juce::File& file, Loaded& out, int attempts);
+    juce::Result installSound (const Loaded& loaded, const juce::File& file);
+    juce::Result loadSound (const juce::File& file);
+    bool hasUserSound() const { return userBank != nullptr; }
 
-    enum class RandomScope { Piece, Layers, Sound, AllSound };
-    void randomise (RandomScope scope);
+    void uiNote (int note, bool on);
     void resetToDefaults();
-    static int getNumPresets() { return (int) amb::presets().size(); }
-    static juce::String getPresetName (int i) { return amb::presets()[(size_t) i].name; }
-    void applyPreset (int index);
-    int getCurrentPreset() const { return currentPreset.load(); }
-    void keepSeed(); // copies the seed of the piece being played into the Seed parameter
 
-    // ---- display (UI reads these) ----
-    float getProgress() const { return progressDisplay.load(); }            // 0..1, or -1 when no piece is playing
-    int getSeedInUse() const { return seedInUse.load(); }
-    int getSceneCount() const { return sceneCount.load(); }
-    float getSceneStart (int i) const { return sceneStart[(size_t) i].load(); }
-    int getSceneMood (int i) const { return sceneMood[(size_t) i].load(); }
-    float getActivity (int layer) const { return activity[(size_t) layer].load(); }
-    bool isNight() const { return apvts.getRawParameterValue ("night")->load() > 0.5f; }
+    struct View { std::vector<float> peaks; bool loops = false; float loopStart = 0.f; };
+    View getView() const;
+    int getViewVersion() const { return viewVersion.load(); }
+    bool isBuilding() const { return building.load() > 0; }
+    float voicePosition (int i) const { return sampler.voicePosition (i); }
+    int getSoundIndex() const { return (int) apvts.getRawParameterValue ("sound")->load(); }
 
     juce::AudioProcessorValueTreeState apvts;
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
-    void parameterChanged (const juce::String& id, float) override;
     void handleAsyncUpdate() override;
-    void publishSource (int slot, std::shared_ptr<const amb::SourceBuffer> s);
-    void installBuiltIns();
+    void parameterChanged (const juce::String& id, float) override { if (id == "sound") triggerAsyncUpdate(); }
+    void publish (std::shared_ptr<const amb::Bank> b);
+    void buildSound (int index);
+    amb::SamplerParams readParams() const;
 
-    amb::Engine engine;
-    amb::Cloud cloud;
-    amb::Reverb reverb;
+    amb::Sampler sampler;
     amb::Echo echo;
-    amb::Tape tape;
-    amb::Dark dark;
-    amb::Crackle crackle;
-    juce::SmoothedValue<float> darkS, crackleS, tapeS, reverbS, echoS, cloudS, levelS;
+    amb::Reverb reverb;
+    juce::SmoothedValue<float> levelS;
     double currentSampleRate = 48000.0, internalBeat = 0.0;
-    std::atomic<int> currentPreset { 0 };
-    gg::Rng seedRng { (uint32_t) 0x5EED1234u };
+    std::atomic<bool> clearRequest { false };
+    std::atomic<int> building { 0 }, viewVersion { 0 }, wanted { 0 };
 
-    // sample hand-over (see the Pad plugin): message thread publishes, audio thread picks up with a try-lock
-    juce::SpinLock sourceLock;
-    std::shared_ptr<const amb::SourceBuffer> source[amb::kNumLayers];
-    std::shared_ptr<const amb::SourceBuffer> audioSource[amb::kNumLayers];
-    std::vector<std::shared_ptr<const amb::SourceBuffer>> retired;
-    mutable juce::SpinLock peakLock;
-    std::vector<float> peaks[amb::kNumLayers];
+    juce::SpinLock kitLock;
+    std::shared_ptr<const amb::Bank> bank, audioBank;
+    std::vector<std::shared_ptr<const amb::Bank>> retired;
+    std::shared_ptr<const amb::Bank> userBank;
+    juce::CriticalSection cacheLock;
+    std::map<int, std::shared_ptr<const amb::Bank>> cache;
+    mutable juce::SpinLock viewLock;
+    View view;
 
-    std::vector<float> dryL, dryR, sendL, sendR, cloudInL, cloudInR;
-    std::atomic<float>* layerRaw[amb::kNumLayers][4] {};   // level, amount, space, root
-    std::atomic<float>* globalRaw[8] {};                   // scale, journey, space, depth, surprise, bars, seed, night
-    std::atomic<float>* fxRaw[7] {};                       // dark, crackle, tape, reverb, echo, cloud, level
-
-    std::atomic<float> progressDisplay { -1.f };
-    std::atomic<int> seedInUse { 0 }, sceneCount { 0 };
-    std::array<std::atomic<float>, 64> sceneStart {};
-    std::array<std::atomic<int>, 64> sceneMood {};
-    std::array<std::atomic<float>, amb::kNumLayers> activity {};
+    struct UiNote { int note; bool on; };
+    juce::AbstractFifo uiFifo { 64 };
+    std::array<UiNote, 64> uiNotes {};
+    std::atomic<float>* raw[16] {};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseAmbientProcessor)
 };

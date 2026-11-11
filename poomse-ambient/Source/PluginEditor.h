@@ -2,93 +2,77 @@
 #include "Look.h"
 #include "PluginProcessor.h"
 
-// The shape of the piece: the scenes that have played (light / deep / still), the arc, and where we are.
-class FormView : public juce::Component, private juce::Timer
+// The sound that is loaded, seen as a wave, with a mark for every note that is playing in it.
+class SoundView : public juce::Component, private juce::Timer
 {
 public:
-    explicit FormView (PoomseAmbientProcessor& p) : proc (p) { startTimerHz (20); }
+    explicit SoundView (PoomseAmbientProcessor&);
     void paint (juce::Graphics&) override;
-private:
-    void timerCallback() override { if (isVisible()) repaint(); }
-    PoomseAmbientProcessor& proc;
-};
-
-// Drop zone for the sample of one layer. It pulses when the layer plays a note.
-class LayerZone : public juce::Component, public juce::FileDragAndDropTarget, private juce::Timer
-{
-public:
-    LayerZone (PoomseAmbientProcessor& p, int slotIndex);
-    void paint (juce::Graphics&) override;
-    void resized() override;
-    bool isInterestedInFileDrag (const juce::StringArray& files) override;
-    void fileDragEnter (const juce::StringArray&, int, int) override { dropHover = true; repaint(); }
-    void fileDragExit (const juce::StringArray&) override { dropHover = false; repaint(); }
-    void filesDropped (const juce::StringArray& files, int, int) override;
+    void showMessage (const juce::String& m, int seconds = 5) { message = m; messageTicks = 30 * seconds; repaint(); }
+    void setDropHover (bool on, const juce::String& fileName = {}) { dropHover = on; dropName = fileName; repaint(); }
 
 private:
     void timerCallback() override;
-    bool tuned() const;
-    void nudgeRoot (int delta);
-
     PoomseAmbientProcessor& proc;
-    const int slot;
-    std::vector<float> peaks;
-    juce::String name, message;
-    int messageTicks = 0;
-    float act = 0.f;
-    bool dropHover = false, night = true;
-    juce::TextButton rootDown { "-" }, rootUp { "+" };
+    PoomseAmbientProcessor::View view;
+    int seenVersion = -1, messageTicks = 0;
+    float marks[amb::Sampler::displayVoices] {};
+    juce::String message, dropName;
+    bool dropHover = false;
 };
 
-class PoomseAmbientEditor : public juce::AudioProcessorEditor, private juce::Timer
+class SoundPad : public juce::Component
+{
+public:
+    SoundPad (juce::String t, juce::String sub) : label (std::move (t)), tagline (std::move (sub)) {}
+    void setLit (bool on) { if (on != lit) { lit = on; repaint(); } }
+    void setAvailable (bool on) { if (on != available) { available = on; repaint(); } }
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { down = true; if (onDown) onDown(); repaint(); }
+    void mouseUp (const juce::MouseEvent&) override { down = false; if (onUp) onUp(); repaint(); }
+    void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
+    std::function<void()> onDown, onUp;
+private:
+    juce::String label, tagline;
+    bool lit = false, down = false, hover = false, available = true;
+};
+
+class PoomseAmbientEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
     explicit PoomseAmbientEditor (PoomseAmbientProcessor&);
     ~PoomseAmbientEditor() override;
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool isInterestedInFileDrag (const juce::StringArray& files) override;
+    void fileDragEnter (const juce::StringArray& files, int, int) override { view.setDropHover (true, files.isEmpty() ? juce::String() : juce::File (files[0]).getFileName()); }
+    void fileDragExit (const juce::StringArray&) override { view.setDropHover (false); }
+    void filesDropped (const juce::StringArray& files, int, int) override;
 
 private:
-    enum class Cell { Big, Small, Mini };
     struct Knob
     {
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
         juce::Label name;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
-    struct Row
-    {
-        juce::String title;
-        Cell cell;
-        int cols = 5;
-        juce::Array<Knob*> knobs;
-        juce::Rectangle<int> titleBounds;
-    };
-    struct Page { bool form = false; std::vector<Row> rows; };
-
-    Knob& makeKnob (const juce::String& paramId, const juce::String& text);
-    void addRow (int page, const char* title, Cell cell, int cols, std::initializer_list<std::pair<const char*, const char*>> params);
-    void showPage (int index);
+    void makeKnob (const juce::String& id, const juce::String& text, const juce::String& help);
+    void choose (int index);
+    void load (const juce::File& file);
     void disarmReset();
-    void stepPreset (int delta);
     void timerCallback() override;
 
-    PoomseLookAndFeel laf;
+    PaperLookAndFeel laf;
     PoomseAmbientProcessor& proc;
+    SoundView view;
     juce::OwnedArray<Knob> knobs;
-    std::array<Page, 3> pages;               // 0 Piece, 1 Layers (custom), 2 Sound
-    int currentPage = 0;
-
-    FormView form;
-    std::array<std::unique_ptr<LayerZone>, amb::kNumLayers> zones;
-    std::array<std::array<Knob*, 3>, amb::kNumLayers> layerKnobs {};
-    juce::Array<Knob*> nightOnlyKnobs;       // dark, crackle, tape: greyed out in Clean style
-
-    juce::TextButton tabButtons[3];
-    juce::TextButton randomButton { "Random" }, resetButton { "Reset" }, nightButton { "Night" }, keepButton { "Keep seed" };
-    juce::TextButton prevPreset { "<" }, nextPreset { ">" };
-    juce::ComboBox presetBox;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> nightAttachment;
+    juce::OwnedArray<SoundPad> pads;
+    juce::StringArray helps;
+    juce::TextButton resetButton { "Reset" }, latchButton { "Latch" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> latchAttachment;
+    juce::String helpText;
+    int hovered = -1, shownSound = -1;
     bool resetArmed = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PoomseAmbientEditor)
