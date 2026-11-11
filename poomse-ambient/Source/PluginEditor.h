@@ -21,21 +21,26 @@ private:
     bool dropHover = false;
 };
 
-class SoundPad : public juce::Component
+class SoundPad : public juce::Component, public juce::FileDragAndDropTarget
 {
 public:
     SoundPad (juce::String t, juce::String sub) : label (std::move (t)), tagline (std::move (sub)) {}
     void setLit (bool on) { if (on != lit) { lit = on; repaint(); } }
-    void setAvailable (bool on) { if (on != available) { available = on; repaint(); } }
+    void setCustom (const juce::String& name) { if (name != custom) { custom = name; repaint(); } }
+    bool isInterestedInFileDrag (const juce::StringArray&) override { return true; }
+    void fileDragEnter (const juce::StringArray&, int, int) override { dropOver = true; repaint(); }
+    void fileDragExit (const juce::StringArray&) override { dropOver = false; repaint(); }
+    void filesDropped (const juce::StringArray& files, int, int) override { dropOver = false; repaint(); if (onFiles) onFiles (files); }
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override { down = true; if (onDown) onDown(); repaint(); }
-    void mouseUp (const juce::MouseEvent&) override { down = false; if (onUp) onUp(); repaint(); }
+    void mouseDown (const juce::MouseEvent& e) override { if (e.mods.isPopupMenu()) { if (onRestore) onRestore(); return; } down = true; if (onDown) onDown(); repaint(); }
+    void mouseUp (const juce::MouseEvent&) override { if (! down) return; down = false; if (onUp) onUp(); repaint(); }
     void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
     void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
-    std::function<void()> onDown, onUp;
+    std::function<void()> onDown, onUp, onRestore;
+    std::function<void (const juce::StringArray&)> onFiles;
 private:
-    juce::String label, tagline;
-    bool lit = false, down = false, hover = false, available = true;
+    juce::String label, tagline, custom;
+    bool lit = false, down = false, hover = false, dropOver = false;
 };
 
 class PoomseAmbientEditor : public juce::AudioProcessorEditor, public juce::FileDragAndDropTarget, private juce::Timer
@@ -59,7 +64,7 @@ private:
     };
     void makeKnob (const juce::String& id, const juce::String& text, const juce::String& help);
     void choose (int index);
-    void load (const juce::File& file);
+    void load (const juce::File& file, int slot);
     void disarmReset();
     void timerCallback() override;
 

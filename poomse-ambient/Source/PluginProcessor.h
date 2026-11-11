@@ -38,10 +38,13 @@ public:
 
     // a dropped sound: read and cut in the background (with new attempts: a file arriving from iCloud is not readable at once), then put in place
     struct Loaded { std::shared_ptr<amb::Bank> bank; juce::String info; };
-    static juce::Result readSound (const juce::File& file, Loaded& out, int attempts);
-    juce::Result installSound (const Loaded& loaded, const juce::File& file);
-    juce::Result loadSound (const juce::File& file);
-    bool hasUserSound() const { return userBank != nullptr; }
+    // a dropped sound goes into one of the four places; what the place is decides how it is played (a short note, a held note, a chord, a place)
+    static juce::Result readSound (const juce::File& file, int slot, Loaded& out, int attempts);
+    juce::Result installSound (int slot, const Loaded& loaded, const juce::File& file);
+    juce::Result loadSound (int slot, const juce::File& file);
+    void restoreOriginal (int slot);
+    bool isCustom (int slot) const { return slot >= 0 && slot < amb::numFactory && userBank[slot] != nullptr; }
+    juce::String customName (int slot) const;
 
     void uiNote (int note, bool on);
     void resetToDefaults();
@@ -74,7 +77,7 @@ private:
     juce::SpinLock kitLock;
     std::shared_ptr<const amb::Bank> bank, audioBank;
     std::vector<std::shared_ptr<const amb::Bank>> retired;
-    std::shared_ptr<const amb::Bank> userBank;
+    std::shared_ptr<const amb::Bank> userBank[amb::numFactory];
     juce::CriticalSection cacheLock;
     std::map<int, std::shared_ptr<const amb::Bank>> cache;
     mutable juce::SpinLock viewLock;

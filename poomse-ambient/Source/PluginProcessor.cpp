@@ -6,7 +6,6 @@ namespace
 using Range = juce::NormalisableRange<float>;
 enum { pSound, pTone, pBloom, pTail, pLoops, pChord, pSpace, pLevel, pLatch, numRaw };
 const char* const kIds[numRaw] = { "sound", "tone", "bloom", "tail", "loops", "chord", "space", "level", "latch" };
-constexpr int kYours = amb::numFactory;
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::createLayout()
@@ -17,7 +16,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PoomseAmbientProcessor::crea
     auto attr = [] (auto fn) { return juce::AudioParameterFloatAttributes().withStringFromValueFunction (fn); };
     auto pct = [] (float x, int) { return juce::String (juce::roundToInt (x * 100.f)) + " %"; };
 
-    l.add (std::make_unique<juce::AudioParameterChoice> (id ("sound"), "Sound", juce::StringArray { "Piano", "Violin", "Pad", "Forest", "Yours" }, 0));
+    l.add (std::make_unique<juce::AudioParameterChoice> (id ("sound"), "Sound", juce::StringArray { "Piano", "Violin", "Pad", "Forest" }, 0));
     l.add (std::make_unique<F> (id ("tone"),  "Tone",  Range (0.f, 1.f, 0.001f), 0.85f, attr (pct)));
     l.add (std::make_unique<F> (id ("bloom"), "Bloom", Range (0.f, 1.f, 0.001f), 0.f, attr ([] (float x, int) { return x < 0.02f ? juce::String ("at once") : juce::String (x * x * 3.f, 1) + " s"; })));
     l.add (std::make_unique<F> (id ("tail"),  "Tail",  Range (0.f, 1.f, 0.001f), 0.5f, attr ([] (float x, int) { return juce::String (0.08f * std::pow (75.f, x), 1) + " s"; })));
@@ -102,8 +101,8 @@ PoomseAmbientProcessor::View PoomseAmbientProcessor::getView() const
 void PoomseAmbientProcessor::buildSound (int index)
 {
     wanted.store (index);
-    if (index == kYours && userBank != nullptr) { publish (userBank); return; }
-    if (index >= amb::numFactory) index = 0;
+    if (index < 0 || index >= amb::numFactory) index = 0;
+    if (userBank[index] != nullptr) { publish (userBank[index]); return; }
     {
         const juce::ScopedLock sl (cacheLock);
         auto it = cache.find (index);
@@ -130,7 +129,7 @@ void PoomseAmbientProcessor::buildSound (int index)
 
 void PoomseAmbientProcessor::handleAsyncUpdate() { buildSound (getSoundIndex()); }
 
-juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, Loaded& out, int attempts)
+juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, int slot, Loaded& out, int attempts)
 {
     juce::String why = "CANNOT READ " + file.getFileName().toUpperCase();
     for (int attempt = 0; attempt < std::max (1, attempts); ++attempt)
@@ -177,26 +176,30 @@ juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, Loaded& 
 
         auto b = std::make_shared<amb::Bank>();
         amb::Zone z; z.sampleRate = rate; z.x[0] = std::move (left); z.x[1] = std::move (right);
+        const int cat = amb::kSoundCategory[std::clamp (slot, 0, (int) amb::numFactory - 1)];
+        b->category = cat;
         juce::String kind;
-        if (seconds > 6.0)                            // a long sound is a place: it is let in by the keys and loops
+        if (cat == amb::Field)                        // a place: let in by the keys, and it loops
         {
-            b->pitched = false; b->category = amb::Field; z.root = 60;
+            b->pitched = false; z.root = 60;
             const int xf = (int) std::min (2.0 * rate, 0.3 * (double) end), n = end - xf;
             amb::detail::wrapLoop (z, n, xf);
-            kind = "A PLACE";
+            kind = "A PLACE, LOOPED";
         }
         else
         {
             std::vector<float> m (z.x[0].size()); for (size_t i = 0; i < m.size(); ++i) m[i] = 0.5f * (z.x[0][i] + z.x[1][i]);
-            z.root = amb::detectRootNote (m, rate, 60);
-            b->pitched = true; b->category = seconds > 1.5 ? amb::Sustained : amb::Short;
-            if (seconds > 1.5)
+            z.root = amb::detectRootNote (m, rate, cat == amb::Pad ? 48 : 60);
+            b->pitched = true;
+            if (cat != amb::Short)                    // held: it loops while the key is down
             {
                 const int a = (int) (0.35 * (double) end);
-                amb::detail::makeLoop (z, a, end, (int) std::min (0.5 * rate, 0.6 * (double) a));
+                amb::detail::makeLoop (z, a, end, (int) std::max (16.0, std::min (0.5 * rate, 0.6 * (double) a)));
+                kind = "HELD, ";
             }
+            else kind = "SHORT, ";
             static const char* names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-            kind = juce::String (names[((z.root % 12) + 12) % 12]) + juce::String (z.root / 12 - 1);
+            kind += juce::String (names[((z.root % 12) + 12) % 12]) + juce::String (z.root / 12 - 1);
         }
         z.x[0].shrink_to_fit(); z.x[1].shrink_to_fit();
         b->zones.push_back (std::move (z));
@@ -208,22 +211,35 @@ juce::Result PoomseAmbientProcessor::readSound (const juce::File& file, Loaded& 
     return juce::Result::fail (why);
 }
 
-juce::Result PoomseAmbientProcessor::installSound (const Loaded& loaded, const juce::File& file)
+juce::Result PoomseAmbientProcessor::installSound (int slot, const Loaded& loaded, const juce::File& file)
 {
-    if (loaded.bank == nullptr) return juce::Result::fail ("NOTHING TO LOAD");
-    userBank = loaded.bank;
-    apvts.state.setProperty ("soundFile", file.getFullPathName(), nullptr);
-    if (auto* p = apvts.getParameter ("sound")) { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 ((float) kYours)); p->endChangeGesture(); }
-    wanted.store (kYours);
-    publish (userBank);
+    if (loaded.bank == nullptr || slot < 0 || slot >= amb::numFactory) return juce::Result::fail ("NOTHING TO LOAD");
+    userBank[slot] = loaded.bank;
+    apvts.state.setProperty ("file" + juce::String (slot), file.getFullPathName(), nullptr);
+    if (auto* p = apvts.getParameter ("sound")) { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 ((float) slot)); p->endChangeGesture(); }
+    wanted.store (slot);
+    publish (userBank[slot]);
     return juce::Result::ok();
 }
 
-juce::Result PoomseAmbientProcessor::loadSound (const juce::File& file)
+juce::Result PoomseAmbientProcessor::loadSound (int slot, const juce::File& file)
 {
     Loaded l;
-    const auto r = readSound (file, l, 1);
-    return r.wasOk() ? installSound (l, file) : r;
+    const auto r = readSound (file, slot, l, 1);
+    return r.wasOk() ? installSound (slot, l, file) : r;
+}
+
+void PoomseAmbientProcessor::restoreOriginal (int slot)
+{
+    if (slot < 0 || slot >= amb::numFactory) return;
+    userBank[slot] = nullptr;
+    apvts.state.removeProperty ("file" + juce::String (slot), nullptr);
+    if (getSoundIndex() == slot) buildSound (slot);
+}
+
+juce::String PoomseAmbientProcessor::customName (int slot) const
+{
+    return juce::File (apvts.state.getProperty ("file" + juce::String (slot)).toString()).getFileName();
 }
 
 void PoomseAmbientProcessor::uiNote (int note, bool on)
@@ -304,7 +320,9 @@ void PoomseAmbientProcessor::resetToDefaults()
     for (auto* q : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (q))
         { rp->beginChangeGesture(); rp->setValueNotifyingHost (rp->getDefaultValue()); rp->endChangeGesture(); }
+    for (int i = 0; i < amb::numFactory; ++i) restoreOriginal (i);
     clearRequest.store (true);
+    buildSound (0);
 }
 
 juce::AudioProcessorEditor* PoomseAmbientProcessor::createEditor() { return new PoomseAmbientEditor (*this); }
@@ -320,9 +338,13 @@ void PoomseAmbientProcessor::setStateInformation (const void* data, int size)
         if (xml->hasTagName (apvts.state.getType()))
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
-            const auto path = apvts.state.getProperty ("soundFile").toString();
-            if (getSoundIndex() == kYours && path.isNotEmpty() && juce::File (path).existsAsFile() && loadSound (juce::File (path)).wasOk()) return;
-            if (getSoundIndex() == kYours) { if (auto* p = apvts.getParameter ("sound")) p->setValueNotifyingHost (0.f); }
+            for (int k = 0; k < amb::numFactory; ++k)
+            {
+                userBank[k] = nullptr;
+                const auto path = apvts.state.getProperty ("file" + juce::String (k)).toString();
+                if (path.isNotEmpty() && juce::File (path).existsAsFile()) loadSound (k, juce::File (path));
+                else apvts.state.removeProperty ("file" + juce::String (k), nullptr);
+            }
             triggerAsyncUpdate();
         }
 }

@@ -47,7 +47,7 @@ void SoundView::paint (juce::Graphics& g)
         g.fillRect (m.getX() + std::min (1.f, mk) * m.getWidth() - 1.f, m.getY(), 2.f, m.getHeight());
     }
     g.setFont (look::caps (9.5f, true, 0.14f));
-    const juce::String head = message.isNotEmpty() ? message : (proc.isBuilding() ? juce::String ("MAKING THE SOUND...") : juce::String ("DROP ANY SOUND ON THE WINDOW TO PLAY IT"));
+    const juce::String head = message.isNotEmpty() ? message : (proc.isBuilding() ? juce::String ("MAKING THE SOUND...") : juce::String ("DROP A SOUND ON A PAD TO REPLACE IT"));
     g.setColour (message.isNotEmpty() || proc.isBuilding() ? look::accent : look::dim);
     g.drawText (head, all.reduced (kInset, 6.f), juce::Justification::topLeft, true);
 
@@ -67,13 +67,15 @@ void SoundPad::paint (juce::Graphics& g)
     const bool on = lit || down;
     if (on) { g.setColour (look::accent); g.fillRoundedRectangle (r, 8.f); }
     else { g.setColour (hover ? look::paper2 : look::paper); g.fillRoundedRectangle (r, 8.f); g.setColour (hover ? look::ink : look::rule); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.4f); }
-    const auto fg = on ? look::paper : (available ? look::ink : look::dim.withAlpha (0.6f)), dim = on ? look::paper.withAlpha (0.85f) : look::dim;
+    const auto fg = on ? look::paper : look::ink, dim = on ? look::paper.withAlpha (0.85f) : look::dim;
     g.setColour (fg);
     g.setFont (look::caps (15.f, true, 0.12f));
     g.drawText (label.toUpperCase(), r.reduced (6.f, 0.f).withTrimmedBottom (8.f), juce::Justification::centred, false);
     g.setColour (dim);
     g.setFont (juce::Font (juce::FontOptions (11.f)));
-    g.drawText (tagline, r.reduced (6.f, 8.f), juce::Justification::centredBottom, false);
+    g.drawText (custom.isNotEmpty() ? custom : tagline, r.reduced (6.f, 8.f), juce::Justification::centredBottom, true);
+    if (custom.isNotEmpty()) { g.setColour (on ? look::paper : look::accent); g.fillEllipse (r.getRight() - 14.f, r.getY() + 8.f, 6.f, 6.f); }
+    if (dropOver) { g.setColour (look::accent); g.drawRoundedRectangle (r.reduced (1.f), 8.f, 2.5f); }
 }
 
 //==============================================================================
@@ -97,16 +99,17 @@ PoomseAmbientEditor::PoomseAmbientEditor (PoomseAmbientProcessor& p) : AudioProc
     setLookAndFeel (&laf);
     addAndMakeVisible (view);
 
-    for (int i = 0; i <= amb::numFactory; ++i)
+    for (int i = 0; i < amb::numFactory; ++i)
     {
-        const bool yours = i == amb::numFactory;
-        auto* pad = pads.add (new SoundPad (yours ? "Yours" : amb::kSoundNames[i], yours ? "drop a sound" : amb::kSoundTags[i]));
+        auto* pad = pads.add (new SoundPad (amb::kSoundNames[i], amb::kSoundTags[i]));
         pad->onDown = [this, i] { choose (i); };
-        pad->onUp = [this, i]
+        pad->onUp = [this, i] { proc.uiNote (i == amb::SPad ? 48 : 60, false); };
+        pad->onFiles = [this, i] (const juce::StringArray& files)
         {
-            const int note = i == amb::SPad ? 48 : 60;
-            proc.uiNote (note, false);
+            for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) { load (ff, i); return; } }
+            view.showMessage ("NOTHING USABLE WAS DROPPED (A FILE FROM THE FINDER IS EXPECTED)");
         };
+        pad->onRestore = [this, i] { if (proc.isCustom (i)) { proc.restoreOriginal (i); view.showMessage ("THE ORIGINAL " + juce::String (amb::kSoundNames[i]).toUpperCase() + " IS BACK", 5); } };
         addAndMakeVisible (pad);
     }
     latchButton.setComponentID ("toggle");
@@ -142,7 +145,6 @@ PoomseAmbientEditor::~PoomseAmbientEditor() { stopTimer(); setLookAndFeel (nullp
 
 void PoomseAmbientEditor::choose (int index)
 {
-    if (index == amb::numFactory && ! proc.hasUserSound()) { view.showMessage ("DROP A SOUND ON THE WINDOW AND IT IS HERE", 6); return; }
     if (auto* prm = proc.apvts.getParameter ("sound"))
     {
         prm->beginChangeGesture(); prm->setValueNotifyingHost (prm->convertTo0to1 ((float) index)); prm->endChangeGesture();
@@ -158,21 +160,21 @@ void PoomseAmbientEditor::timerCallback()
     if (h != hovered) { hovered = h; repaint(); }
     const int s = proc.getSoundIndex();
     if (s != shownSound) { shownSound = s; for (int i = 0; i < pads.size(); ++i) pads[i]->setLit (i == s); }
-    pads[amb::numFactory]->setAvailable (proc.hasUserSound());
+    for (int i = 0; i < pads.size(); ++i) pads[i]->setCustom (proc.isCustom (i) ? proc.customName (i) : juce::String());
 }
 
-void PoomseAmbientEditor::load (const juce::File& file)
+void PoomseAmbientEditor::load (const juce::File& file, int slot)
 {
     view.setDropHover (false);
-    view.showMessage ("LOADING " + file.getFileName().toUpperCase() + "...", 60);
-    juce::Thread::launch ([safe = juce::Component::SafePointer<PoomseAmbientEditor> (this), file]
+    view.showMessage ("LOADING " + file.getFileName().toUpperCase() + " AS THE " + juce::String (amb::kSoundNames[slot]).toUpperCase() + "...", 60);
+    juce::Thread::launch ([safe = juce::Component::SafePointer<PoomseAmbientEditor> (this), file, slot]
     {
         PoomseAmbientProcessor::Loaded loaded;
-        const auto read = PoomseAmbientProcessor::readSound (file, loaded, 10);
-        juce::MessageManager::callAsync ([safe, file, loaded, read]
+        const auto read = PoomseAmbientProcessor::readSound (file, slot, loaded, 10);
+        juce::MessageManager::callAsync ([safe, file, loaded, read, slot]
         {
             if (safe == nullptr) return;
-            const auto result = read.wasOk() ? safe->proc.installSound (loaded, file) : read;
+            const auto result = read.wasOk() ? safe->proc.installSound (slot, loaded, file) : read;
             safe->view.showMessage (result.wasOk() ? "LOADED  " + loaded.info : result.getErrorMessage(), result.wasOk() ? 8 : 15);
         });
     });
@@ -186,7 +188,7 @@ bool PoomseAmbientEditor::isInterestedInFileDrag (const juce::StringArray& files
 
 void PoomseAmbientEditor::filesDropped (const juce::StringArray& files, int, int)
 {
-    for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) { load (ff); return; } }
+    for (const auto& f : files) { const juce::File ff (f); if (ff.existsAsFile() || ff.hasFileExtension (kAudioExt)) { load (ff, std::clamp (proc.getSoundIndex(), 0, (int) amb::numFactory - 1)); return; } }
     view.setDropHover (false);
     view.showMessage ("NOTHING USABLE WAS DROPPED (A FILE FROM THE FINDER IS EXPECTED)");
 }
@@ -209,12 +211,12 @@ void PoomseAmbientEditor::paint (juce::Graphics& g)
     g.setColour (look::dim);
     for (int i = 0; i < pads.size(); ++i)
     {
-        const juce::String cat = i < amb::numFactory ? juce::String (amb::kCategoryNames[amb::kSoundCategory[i]]) : juce::String ("YOUR OWN");
+        const juce::String cat = amb::kCategoryNames[amb::kSoundCategory[i]];
         g.drawText (cat, pads[i]->getX(), pads[i]->getY() - 16, pads[i]->getWidth(), 12, juce::Justification::centred, false);
     }
     g.setColour (look::ink);
     g.setFont (juce::Font (juce::FontOptions (12.5f)));
-    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Choose a sound, then play. Hold a key; Loops makes it say its note again. Drop any sound on the window."),
+    g.drawText (hovered >= 0 && hovered < helps.size() ? helps[hovered] : juce::String ("Drop your own sound on a pad to replace it (right-click a pad to get the original back). Hold a key; Loops makes it say its note again."),
                 kPad, getHeight() - 36, getWidth() - 2 * kPad, 20, juce::Justification::centredLeft, false);
 }
 
